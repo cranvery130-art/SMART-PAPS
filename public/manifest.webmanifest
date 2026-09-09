@@ -1,0 +1,17 @@
+{
+  "name": "SMART PAPS - 체육 PAPS 기록관리",
+  "short_name": "SMART PAPS",
+  "description": "중학교 체육수업용 PAPS(팝스) 실시간 기록·랭킹 관리 프로그램",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0B1220",
+  "theme_color": "#1E63C9",
+  "orientation": "any",
+  "lang": "ko",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
