@@ -333,12 +333,12 @@ function buildReferenceBands() {
 }
 const REFERENCE_BANDS = buildReferenceBands();
 
-function buildDefaultConfig(schoolLevel, viewerPassword) {
+function buildDefaultConfig(schoolLevel, viewerPassword, founderPassword) {
   const lvl = schoolLevel || "middle";
   return {
     students: [],
     criteria: buildDefaultCriteria(lvl),
-    settings: { schoolName: "", schoolLevel: lvl, passGradeThreshold: 4, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "" },
+    settings: { schoolName: "", schoolLevel: lvl, passGradeThreshold: 4, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
   };
 }
 
@@ -634,6 +634,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [gateInitialMode, setGateInitialMode] = useState("code");
   const pendingSchoolLevelRef = useRef("middle"); // 새 코드를 만들 때 고른 학교급(기존 코드면 무시됨)
   const pendingViewerPasswordRef = useRef(""); // 새 코드를 만들 때 함께 정한 접근 신청 비밀번호
+  const pendingFounderPasswordRef = useRef(""); // 새 코드를 만들 때 정한(또는 기존 코드 재접속 시 입력한) 개설자 전용 비밀번호
   const [workspaceChecking, setWorkspaceChecking] = useState(true);
   const [role, setRole] = useState(null); // 'admin' | 'viewer' | 'pending' | 'blocked'
   const [isFounder, setIsFounder] = useState(false);
@@ -712,11 +713,12 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     })();
   }, []);
 
-  function submitWorkspaceCode(raw, schoolLevel, viewerPassword) {
+  function submitWorkspaceCode(raw, schoolLevel, viewerPassword, founderPassword) {
     const code = sanitizeWorkspaceCode(raw);
     if (!code) return;
     pendingSchoolLevelRef.current = schoolLevel || "middle";
     pendingViewerPasswordRef.current = (viewerPassword || "").trim();
+    pendingFounderPasswordRef.current = (founderPassword || "").trim();
     saveWorkspaceCodeRemote(code);
     setWorkspaceCode(code);
   }
@@ -790,8 +792,21 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         return;
       }
 
-      // 이미 개설된 코드에 코드만 입력해 들어온 경우 — 이 입력창으로는 더 이상 아무 권한도
-      // 주지 않는다. 조회든 수정 권한이든 모두 "접근 신청" 절차를 거쳐야 한다.
+      // 이미 개설된 코드에 코드만 입력해 들어온 경우. 단, 이번에 함께 입력한 값이 "개설자
+      // 전용 비밀번호"와 정확히 일치하면(개설자 본인이 다른 기기로 넘어온 경우), 별도
+      // 승인 절차 없이 곧바로 개설자로 인정한다. 그 외에는 "접근 신청" 절차를 거쳐야 한다.
+      const founderPw = cfg.settings?.founderPassword;
+      if (founderPw && pendingFounderPasswordRef.current && pendingFounderPasswordRef.current === founderPw) {
+        const newId = uid("dev");
+        await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
+        setMyDeviceId(newId);
+        setIsFounder(true);
+        setMyDisplayName("개설자");
+        setRole("admin");
+        setRoleChecking(false);
+        return;
+      }
+
       setRole("blocked");
       setBlockReason("need-request");
       setRoleChecking(false);
@@ -839,12 +854,25 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     await clearPasswordAttempts(attempt.key);
 
     const list = await loadAccessList(sanitizedCode);
-    const id = uid("req");
+    const trimmedName = name.trim();
     const type = wantsEdit ? "editor" : "viewer";
+
+    // 이미 같은 이름 + 같은 권한 종류로 승인받은 계정이 있다면(브라우저 데이터가 지워졌거나
+    // 새 기기로 바꾼 경우일 가능성이 높음), 다시 승인을 기다리지 않고 그 기존 승인을 이
+    // 기기로 그대로 이어받는다. 이름과 비밀번호가 둘 다 맞아야 하므로 위험은 낮다.
+    const existing = list.requests.find(r => r.status === "approved" && r.name === trimmedName && r.type === type);
+    if (existing) {
+      await saveDeviceRole(sanitizedCode, { id: existing.id, role: type === "editor" ? "admin" : "viewer" });
+      await saveWorkspaceCodeRemote(sanitizedCode);
+      setWorkspaceCode(sanitizedCode);
+      return { ok: true, reclaimed: true };
+    }
+
+    const id = uid("req");
     // 조회는 비밀번호 확인만으로 즉시 승인되지만, 데이터 수정 권한은 최초 개설자의
     // 별도 승인이 있어야 부여된다.
     const status = wantsEdit ? "pending" : "approved";
-    const entry = { id, name: name.trim(), submittedAt: Date.now(), status, type };
+    const entry = { id, name: trimmedName, submittedAt: Date.now(), status, type };
     await saveAccessList(sanitizedCode, { requests: [...list.requests, entry] });
     await saveDeviceRole(sanitizedCode, { id, role: wantsEdit ? "pending" : "viewer" });
     await saveWorkspaceCodeRemote(sanitizedCode);
@@ -935,7 +963,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       // either way the correct move is to fall back to empty/default data.
       const cfg = await loadConfig(workspaceCode);
       const recs = await loadRecordsRemote(workspaceCode);
-      const finalCfg = cfg || buildDefaultConfig(pendingSchoolLevelRef.current, pendingViewerPasswordRef.current);
+      const finalCfg = cfg || buildDefaultConfig(pendingSchoolLevelRef.current, pendingViewerPasswordRef.current, pendingFounderPasswordRef.current);
       if (!finalCfg.settings) finalCfg.settings = { schoolName: "", passGradeThreshold: 4 };
       if (!finalCfg.settings.currentYear) finalCfg.settings.currentYear = thisYear();
       const year = finalCfg.settings.currentYear;
@@ -1572,6 +1600,9 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   const [schoolLevel, setSchoolLevel] = useState("middle");
   const [initialPassword, setInitialPassword] = useState("");
   const [showInitialPassword, setShowInitialPassword] = useState(false);
+  const [founderPassword, setFounderPassword] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [showFounderPassword, setShowFounderPassword] = useState(false);
   const [agree, setAgree] = useState(false);
   const [name, setName] = useState("");
   const [reqCode, setReqCode] = useState("");
@@ -1604,7 +1635,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
 
   function submitCode() {
     if (!value.trim()) return;
-    onSubmit(value, schoolLevel, initialPassword);
+    onSubmit(value, schoolLevel, initialPassword, founderPassword);
   }
 
   if (mode === "code") {
@@ -1624,71 +1655,132 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             <ClipboardList size={13} /> 사용설명서
           </button>
           <div className="gate-divider" />
-          <h2>우리 학교 코드 설정</h2>
+
+          <h2>코드로 로그인</h2>
           <p className="gate-desc">
-            측정을 시작하기 위한 학교코드를 작성해주세요.<br />
-            무분별한 접근을 방지할 수 있습니다.
+            이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
+            바로 들어갈 수 있습니다.
           </p>
-          <div className="gate-level-row">
-            <label>학교급</label>
-            <div className="chip-row gate-level-chips">
-              {SCHOOL_LEVELS.map(l => (
-                <button
-                  key={l.id}
-                  type="button"
-                  className={"chip" + (schoolLevel === l.id ? " active" : "")}
-                  onClick={() => setSchoolLevel(l.id)}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
-          </div>
           <input
             className="input big-input gate-input"
             placeholder="예: 낭만체육123"
             value={value}
             onChange={e => setValue(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+            onKeyDown={e => { if (e.key === "Enter" && value.trim() && !createOpen) submitCode(); }}
           />
-          <div className="text-dim small-note gate-code-warn">
-            학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
-            알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
-            이름을 추천합니다.
-          </div>
-          <div className="gate-pw-row">
-            <label>비밀번호 설정</label>
-            <div className="pw-row">
-              <input
-                className="input"
-                type={showInitialPassword ? "text" : "password"}
-                value={initialPassword}
-                onChange={e => setInitialPassword(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                placeholder="예: 체육0925"
-              />
-              <button type="button" className="btn btn-ghost small" onClick={() => setShowInitialPassword(v => !v)}>{showInitialPassword ? "숨기기" : "보기"}</button>
-            </div>
-            <div className="text-dim small-note gate-pw-hint">
-              동료 교사가 접근 신청 시 입력할 비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
-              연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
-            </div>
-          </div>
-          <button className="btn btn-primary big-btn gate-create-emphasis" disabled={!value.trim()} onClick={submitCode}>
-            <Plus size={15} /> 새 코드 만들기
-          </button>
-          <div className="gate-note">
-            <Info size={14} />
-            <span>
-              이미 등록되어 있는 학교코드라면 반영되지 않을 수 있습니다.
-            </span>
-          </div>
-          <button className="gate-link-btn" onClick={() => setMode("notice")}>
-            이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
-          </button>
-          <div className="gate-input-hint">
-            동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
-          </div>
+          {!createOpen && (
+            <>
+              <div className="gate-pw-row">
+                <label>개설자 전용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showFounderPassword ? "text" : "password"}
+                    value={founderPassword}
+                    onChange={e => setFounderPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 원장선생님0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
+                </div>
+              </div>
+              <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
+                로그인
+              </button>
+
+              <div className="gate-divider" />
+
+              <button className="gate-link-btn" onClick={() => setMode("notice")}>
+                이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
+              </button>
+              <div className="gate-input-hint">
+                동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
+              </div>
+
+              <div className="gate-divider" />
+
+              <button className="btn btn-secondary big-btn gate-create-emphasis" onClick={() => setCreateOpen(true)}>
+                <Plus size={15} /> 처음이신가요? 새 코드 만들기
+              </button>
+            </>
+          )}
+
+          {createOpen && (
+            <>
+              <div className="text-dim small-note gate-code-warn">
+                학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
+                알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
+                이름을 추천합니다.
+              </div>
+              <div className="gate-level-row">
+                <label>학교급</label>
+                <div className="chip-row gate-level-chips">
+                  {SCHOOL_LEVELS.map(l => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      className={"chip" + (schoolLevel === l.id ? " active" : "")}
+                      onClick={() => setSchoolLevel(l.id)}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="gate-pw-row">
+                <label>비밀번호 설정</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showInitialPassword ? "text" : "password"}
+                    value={initialPassword}
+                    onChange={e => setInitialPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 체육0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowInitialPassword(v => !v)}>{showInitialPassword ? "숨기기" : "보기"}</button>
+                </div>
+                <div className="text-dim small-note gate-pw-hint">
+                  동료 교사가 접근 신청 시 입력할 비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
+                  연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
+                </div>
+              </div>
+              <div className="gate-pw-row">
+                <label>개설자 전용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showFounderPassword ? "text" : "password"}
+                    value={founderPassword}
+                    onChange={e => setFounderPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 원장선생님0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
+                </div>
+                <div className="text-dim small-note gate-pw-hint">
+                  선생님(개설자) 본인만 알아야 하는 비밀번호입니다. 나중에 다른 기기(휴대폰↔컴퓨터 등)에서
+                  같은 코드와 이 비밀번호를 위 "코드로 로그인" 칸에 입력하면, 승인 절차 없이 곧바로
+                  개설자로 다시 들어올 수 있어요. 위 "비밀번호 설정"과는 다른 값으로 정해주세요
+                  (동료 교사에게는 절대 알려주지 마세요).
+                </div>
+              </div>
+              <button className="btn btn-primary big-btn" disabled={!value.trim()} onClick={submitCode}>
+                만들기
+              </button>
+              <div className="gate-note">
+                <Info size={14} />
+                <span>
+                  이미 등록되어 있는 학교코드라면, 개설자 전용 비밀번호가 맞을 때만 개설자로
+                  들어가지고, 그 외에는 반영되지 않습니다.
+                </span>
+              </div>
+              <button className="btn btn-ghost gate-back-toggle" onClick={() => setCreateOpen(false)}>
+                ← 코드로 로그인 화면으로 돌아가기
+              </button>
+            </>
+          )}
+
           {visitStats && (
             <div className="visit-stats-row">
               <span>오늘 방문 <b>{visitStats.daily}</b></span>
@@ -1785,6 +1877,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
 function UserManualModal({ onClose }) {
   const [codeNoteOpen, setCodeNoteOpen] = useState(false);
   const [mobileNoteOpen, setMobileNoteOpen] = useState(false);
+  const [nameNoteOpen, setNameNoteOpen] = useState(false);
   const steps = [
     { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
     { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 끌어다 놓으면 한 번에 등록됩니다." },
@@ -1820,6 +1913,31 @@ function UserManualModal({ onClose }) {
                         알려지면, 그 학교 사정을 아는 사람은 "몇 학년 몇 반 몇 번이 누구인지"를
                         비교적 쉽게 유추할 수 있습니다. 코드를 학교 이름과 무관하게 정하면, 이
                         코드만으로는 어느 학교인지 알 수 없어 이런 위험을 줄일 수 있습니다.
+                      </div>
+                    )}
+                  </>
+                )}
+                {i === 1 && (
+                  <>
+                    <button type="button" className="manual-note-btn" onClick={() => setNameNoteOpen(v => !v)}>
+                      참고사항 {nameNoteOpen ? "▲" : "▼"}
+                    </button>
+                    {nameNoteOpen && (
+                      <div className="manual-note-box">
+                        <b>지금 이 이름은 어디에 저장되나요?</b><br />
+                        이 사이트는 학생 이름을 서버(Firestore)에 아예 보내지 않습니다. 서버에는
+                        학년·반·번호·성별처럼 학생을 구분하는 정보만 저장되고, 실제 이름은 지금
+                        입력하고 있는 <b>이 기기(브라우저)에만</b> 남습니다.<br /><br />
+                        그래서 같은 학교 코드로 다른 기기(동료 선생님 컴퓨터, 새로 바꾼 휴대폰 등)에
+                        처음 접속하면, 그 기기엔 아직 이름표가 없어서 이름 대신 "(이름 미확인 - 이
+                        기기)"처럼 보일 수 있어요. 그 상태에서 실명이 포함된 백업 파일을 불러오면
+                        그 기기에도 이름이 채워집니다.<br /><br />
+                        <b>전광판 화면</b>은 어느 기기에서 보든 이름 대신 [학년-반-번호] 형태로만
+                        표시됩니다(개인정보 보호를 위해 항상 가림).<br /><br />
+                        <b>이름이 그대로 들어가는 곳</b>: 데이터 백업의 "실명포함(교사보관용)" 옵션,
+                        나이스 제출용 엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을
+                        채워 넣으며, 실명이 필요한 목적이라 의도적으로 포함시킵니다. 다른 사람과
+                        공유할 땐 백업의 "익명화(외부공유용)" 옵션을 쓰면 이름 없이 내보낼 수 있어요.
                       </div>
                     )}
                   </>
@@ -1904,6 +2022,7 @@ function BlockedScreen({ reason, onRetry }) {
 
 function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestore, onDeleteEntry, onTransferFounder, onUndoRecord, settings, setSettings, onOpenShare, isFounder, workspaceCode, showToast }) {
   const [showPw, setShowPw] = useState(false);
+  const [showFounderPw, setShowFounderPw] = useState(false);
   const [auditLog, setAuditLog] = useState(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [transferTarget, setTransferTarget] = useState(null);
@@ -1970,6 +2089,31 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           아래 목록에서 따로 취소해야 해요. 이 비밀번호는 아래 "빔프로젝터 화면 잠금"에도 쓰입니다.
           연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상을 권장합니다.
         </div>
+
+        {isFounder && (
+          <>
+            <div className="divider" />
+            <h3>개설자 전용 비밀번호</h3>
+            <div className="text-dim small-note">
+              다른 기기(휴대폰↔컴퓨터 등)에서 이 코드와 이 비밀번호를 함께 입력하면, 승인 절차
+              없이 곧바로 개설자로 다시 들어올 수 있습니다. <b>동료 교사에게는 절대 알려주지
+              마세요</b> — 이걸 아는 사람은 누구나 개설자 전권을 갖게 됩니다.
+            </div>
+            <div className="form-row">
+              <label>개설자 전용 비밀번호</label>
+              <div className="pw-row">
+                <input
+                  className="input"
+                  type={showFounderPw ? "text" : "password"}
+                  value={settings.founderPassword || ""}
+                  onChange={e => setSettings({ ...settings, founderPassword: e.target.value })}
+                  placeholder="예: 원장선생님0925"
+                />
+                <button className="btn btn-ghost small" onClick={() => setShowFounderPw(v => !v)}>{showFounderPw ? "숨기기" : "보기"}</button>
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="divider" />
 
@@ -2207,9 +2351,19 @@ function DeviceSyncGuideModal({ onClose }) {
       title: "여러 기기를 어떻게 나눠 쓰면 좋은가",
       body: "예: 노트북은 교무실 책상에 두고 등급표·백업 등 정리 작업을, 휴대폰은 운동장에 들고 나가 실측 기록 입력을 담당하는 식으로 나눠 쓰면 편합니다. 두 기기 모두 같은 코드로 로그인하면 됩니다.",
     },
+    {
+      title: "개설자(관리자) 권한을 여러 기기에서 쓰려면",
+      body: "코드를 처음 만들 때 정한 \"개설자 전용 비밀번호\"를 기억해두세요. 다른 기기의 \"코드로 로그인\" 화면에 코드와 이 비밀번호를 입력하면, 별도 승인 없이 바로 개설자 권한으로 들어갈 수 있습니다.",
+    },
+    {
+      title: "동료 교사가 다른 기기에서 다시 들어와야 할 때",
+      body: "이미 승인받은 것과 똑같은 이름 + 똑같은 권한 종류(수정 권한/조회)로 접근 신청을 다시 하면, 처음부터 다시 승인을 기다리지 않고 기존 승인을 그대로 이어받습니다. 이름을 정확히 똑같이 입력하는 게 중요해요.",
+    },
   ];
   const cautions = [
     "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보가 사라져 다시 접근 절차를 밟아야 할 수 있습니다.",
+    "같은 이름을 쓰는 동료 교사가 두 명 이상이면, 위 \"기존 승인 이어받기\" 기능 때문에 서로 같은 자리를 나눠 쓰게 될 수 있어요. 이름에 학년·반처럼 구분되는 정보를 꼭 포함해 주세요.",
+    "개설자 전용 비밀번호는 동료 교사에게 알려주지 마세요 — 이걸 아는 사람은 승인 절차 없이 곧바로 전체 권한을 갖게 됩니다.",
     "인터넷 연결이 끊긴 상태에서 입력한 기록은 연결이 복구되어야 다른 기기에 반영됩니다.",
   ];
   return (
@@ -5670,6 +5824,7 @@ function PapsStyles({ children }) {
         .gate-pw-hint { margin-top: 6px; }
         .gate-code-warn { text-align: left; margin: 6px 0 12px; }
         .gate-name-hint { text-align: left; margin: -6px 0 12px; }
+        .gate-back-toggle { width: 100%; justify-content: center; margin-top: 10px; font-size: 12px; }
         .gate-divider { width: 48px; height: 2px; background: var(--line); border-radius: 999px; margin: 6px 0 16px; }
         .manual-btn {
           display: inline-flex; align-items: center; gap: 5px; background: rgba(255,201,60,0.12);
