@@ -885,6 +885,25 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const approveRequest = (id) => decideRequest(id, "approved", "승인함");
   const denyRequest = (id) => decideRequest(id, "denied", "거절함");
   const revokeApproval = (id) => decideRequest(id, "denied", "취소함(권한 회수)");
+  const restoreRequest = (id) => decideRequest(id, "approved", "복구함(다시 승인)");
+
+  // 거절/취소된 신청을 목록에서 아예 지운다(실수로 거절한 신청이 목록에 계속 남아있는 게
+  // 번거롭다는 요청 반영). 복구와 달리 삭제는 되돌릴 수 없다.
+  async function deleteRequestEntry(id) {
+    const list = await loadAccessList(workspaceCode);
+    const target = list.requests.find(r => r.id === id);
+    const nextList = { requests: list.requests.filter(r => r.id !== id) };
+    await saveAccessList(workspaceCode, nextList);
+    setAccessList(nextList);
+    if (target) {
+      appendAuditLog(workspaceCode, {
+        type: "access",
+        ts: Date.now(),
+        by: myDisplayName,
+        message: `${myDisplayName}님이 ${target.name}님의 거절/취소 기록을 삭제함`,
+      });
+    }
+  }
 
   // 개설자 승계: 예를 들어 담당 선생님이 전근을 가는 경우, 승인된 편집자 중 한 명에게
   // "개설자" 자리를 넘겨준다. 넘겨준 뒤에는 나(원래 개설자)도 평범한 승인 편집자가 되어,
@@ -1161,17 +1180,26 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     showToast("백업 파일을 불러왔습니다.", "ok");
   }, [role, workspaceCode, showToast]);
 
-  // 학기 마감: 나이스 제출 등 사용 목적을 다한 뒤, 학생 개인정보(체력 기록)를 계속
-  // 저장해둘 필요가 없도록 기록(및 선택 시 학생 명단)을 완전히 비운다. 되돌릴 수 없다.
+  // 학기 마감: 나이스 제출 등 사용 목적을 다한 뒤, 학생 개인정보를 계속 저장해둘 필요가
+  // 없도록 기록·학생 명단뿐 아니라 이 학교 코드 자체(설정·접근권한·이력 등 전부)를 완전히
+  // 지운다. 마감 후에는 이 코드가 다시 "아무도 만든 적 없는 코드"가 되어, 화면은 첫
+  // 화면(코드 설정)으로 돌아간다. 되돌릴 수 없다.
   const performSemesterCloseout = useCallback(async () => {
     if (role !== "admin") return;
-    await saveRecordsRemote(workspaceCode, {});
-    setRecords({});
-    setStudents([]);
-    await saveConfigRemote(workspaceCode, { students: [], criteria, settings });
-    setLastSync(Date.now());
-    showToast("마감이 완료되었습니다. 기록과 학생 명단이 모두 삭제되었습니다.", "ok");
-  }, [role, workspaceCode, criteria, settings, showToast]);
+    await storage.delete(recordsKey(workspaceCode), true).catch(() => {});
+    await storage.delete(configKey(workspaceCode), true).catch(() => {});
+    await storage.delete(accessKey(workspaceCode), true).catch(() => {});
+    await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
+    await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
+    await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+    // 이 기기에 남아있던 학생 이름표(익명화를 위해 로컬에만 저장해뒀던 실명 매핑)도 함께
+    // 지운다 — 서버 데이터가 사라진 뒤에도 이 브라우저에만 실명이 남아있지 않도록 한다.
+    try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
+    showToast("마감이 완료되었습니다. 이 학교 코드의 모든 데이터가 삭제되었습니다.", "ok");
+    setWorkspaceCode(null);
+    setRole(null);
+    setLoading(true);
+  }, [role, workspaceCode, showToast]);
 
   /* ---------- 계산 함수 (연도별) ---------- */
   const getBands = useCallback((eventId, gender, schoolGrade) => {
@@ -1512,6 +1540,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               onApprove={approveRequest}
               onDeny={denyRequest}
               onRevoke={revokeApproval}
+              onRestore={restoreRequest}
+              onDeleteEntry={deleteRequestEntry}
               onTransferFounder={transferFounder}
               onUndoRecord={undoRecordChange}
               settings={settings}
@@ -1644,8 +1674,8 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
               연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
             </div>
           </div>
-          <button className="btn btn-primary big-btn" disabled={!value.trim()} onClick={submitCode}>
-            새 코드 만들기
+          <button className="btn btn-primary big-btn gate-create-emphasis" disabled={!value.trim()} onClick={submitCode}>
+            <Plus size={15} /> 새 코드 만들기
           </button>
           <div className="gate-note">
             <Info size={14} />
@@ -1711,6 +1741,10 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             value={name}
             onChange={e => setName(e.target.value)}
           />
+          <div className="text-dim small-note gate-name-hint">
+            동명이인이 있으면 같은 신청으로 헷갈릴 수 있으니, "김민준"보다 "2학년 3반 김민준"처럼
+            소속이나 담당 학급을 함께 적어 다른 선생님과 구분되게 해주세요.
+          </div>
           <input
             className="input big-input gate-input"
             placeholder="학교 코드"
@@ -1868,7 +1902,7 @@ function BlockedScreen({ reason, onRetry }) {
 
 /* ============================== 접근 요청 관리(관리자) ============================== */
 
-function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onTransferFounder, onUndoRecord, settings, setSettings, onOpenShare, isFounder, workspaceCode, showToast }) {
+function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestore, onDeleteEntry, onTransferFounder, onUndoRecord, settings, setSettings, onOpenShare, isFounder, workspaceCode, showToast }) {
   const [showPw, setShowPw] = useState(false);
   const [auditLog, setAuditLog] = useState(null);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -2003,7 +2037,14 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onTransf
                   <div>
                     <div className="access-name text-dim">{r.name}</div>
                   </div>
-                  <span className="text-dim small-note">거절됨</span>
+                  {isFounder ? (
+                    <div className="access-actions">
+                      <button className="btn btn-ghost small" onClick={() => onRestore(r.id)}>복구</button>
+                      <button className="btn btn-ghost small danger-btn" onClick={() => onDeleteEntry(r.id)}>삭제</button>
+                    </div>
+                  ) : (
+                    <span className="text-dim small-note">거절됨</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -2070,6 +2111,7 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onTransf
 function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, lastSync, activeYear, setActiveYear, workspaceCode, onChangeWorkspace, onEnterPresentation, theme, onToggleTheme }) {
   const isAdmin = role === "admin";
   const [updatesOpen, setUpdatesOpen] = useState(false);
+  const [deviceGuideOpen, setDeviceGuideOpen] = useState(false);
   const allTabs = [
     { id: "board", label: "전광판", icon: Monitor },
     { id: "roster", label: "학생관리", icon: Users, adminOnly: true },
@@ -2101,6 +2143,9 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
         <span className="brand-text">{schoolName ? schoolName + " " : ""}SMART PAPS</span>
         <button className="feature-updates-btn" onClick={() => setUpdatesOpen(true)} title="이 프로그램이 할 수 있는 일 모아보기">
           <Award size={12} /> 기능설명
+        </button>
+        <button className="feature-updates-btn" onClick={() => setDeviceGuideOpen(true)} title="여러 기기(휴대폰·노트북)를 함께 쓰는 방법 자세히 보기">
+          <Info size={12} /> 상세설명
         </button>
         {isAdmin ? (
           <button className="workspace-badge" onClick={onChangeWorkspace} title="워크스페이스 코드 변경">
@@ -2143,6 +2188,52 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
         </button>
       </div>
       {updatesOpen && <FeatureUpdatesModal isAdmin={isAdmin} onClose={() => setUpdatesOpen(false)} />}
+      {deviceGuideOpen && <DeviceSyncGuideModal onClose={() => setDeviceGuideOpen(false)} />}
+    </div>
+  );
+}
+
+// 참고: 원래 아티팩트 버전엔 "개설자 전용 비밀번호로 다른 기기에서 즉시 재접속"과
+// "동료 교사가 같은 이름으로 재신청하면 기존 승인을 자동으로 이어받는" 기능까지 함께
+// 안내하는 내용이 있었지만, 이 웹사이트 버전에는 그 두 기능 자체가 아직 반영되어 있지
+// 않아 여기서는 뺐다(두 기능을 나중에 이 웹사이트에도 반영하면 그때 안내를 다시 채우면 됨).
+function DeviceSyncGuideModal({ onClose }) {
+  const sections = [
+    {
+      title: "기본 원리",
+      body: "휴대폰·노트북 어디서 접속하든 \"학교 코드\"만 같으면 같은 데이터를 봅니다. 한 기기에서 기록을 입력하면, 몇 초 안에 다른 기기 화면에도 자동으로 반영돼요(따로 저장·새로고침 누를 필요 없음).",
+    },
+    {
+      title: "여러 기기를 어떻게 나눠 쓰면 좋은가",
+      body: "예: 노트북은 교무실 책상에 두고 등급표·백업 등 정리 작업을, 휴대폰은 운동장에 들고 나가 실측 기록 입력을 담당하는 식으로 나눠 쓰면 편합니다. 두 기기 모두 같은 코드로 로그인하면 됩니다.",
+    },
+  ];
+  const cautions = [
+    "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보가 사라져 다시 접근 절차를 밟아야 할 수 있습니다.",
+    "인터넷 연결이 끊긴 상태에서 입력한 기록은 연결이 복구되어야 다른 기기에 반영됩니다.",
+  ];
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><Info size={18} color="var(--gold)" /> 상세설명 — 여러 기기 함께 쓰기</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          {sections.map((s, i) => (
+            <div className="feature-update-group" key={i}>
+              <h4>{s.title}</h4>
+              <div className="text-dim small-note">{s.body}</div>
+            </div>
+          ))}
+          <div className="feature-update-group">
+            <h4>주의·유의사항</h4>
+            <ul className="device-guide-caution-list">
+              {cautions.map((c, i) => <li key={i} className="text-dim small-note">{c}</li>)}
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5577,6 +5668,7 @@ function PapsStyles({ children }) {
         .gate-pw-row > label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
         .gate-pw-hint { margin-top: 6px; }
         .gate-code-warn { text-align: left; margin: 6px 0 12px; }
+        .gate-name-hint { text-align: left; margin: -6px 0 12px; }
         .gate-divider { width: 48px; height: 2px; background: var(--line); border-radius: 999px; margin: 6px 0 16px; }
         .manual-btn {
           display: inline-flex; align-items: center; gap: 5px; background: rgba(255,201,60,0.12);
@@ -5691,6 +5783,7 @@ function PapsStyles({ children }) {
         .btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
         .btn.small { padding: 6px 10px; font-size: 12px; }
         .big-btn { width: 100%; justify-content: center; padding: 13px; font-size: 15px; margin-top: 6px; }
+        .gate-create-emphasis { border: 2px solid var(--gold); box-shadow: 0 0 0 3px rgba(255,201,60,0.15); }
         .icon-btn { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 6px; }
         .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
         .icon-btn.danger:hover { color: var(--track-red); }
