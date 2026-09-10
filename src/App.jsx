@@ -2144,7 +2144,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
         <button className="feature-updates-btn" onClick={() => setUpdatesOpen(true)} title="이 프로그램이 할 수 있는 일 모아보기">
           <Award size={12} /> 기능설명
         </button>
-        <button className="feature-updates-btn" onClick={() => setDeviceGuideOpen(true)} title="여러 기기(휴대폰·노트북)를 함께 쓰는 방법 자세히 보기">
+        <button className="feature-updates-btn" onClick={() => setDeviceGuideOpen(true)} title="휴대폰·노트북 함께 쓰는 법 자세히 보기">
           <Info size={12} /> 상세설명
         </button>
         {isAdmin ? (
@@ -5075,7 +5075,7 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
         <h3>마감 전 꼭 확인하세요</h3>
         <ul className="closeout-checklist">
           <li><b>나이스(NEIS) 제출을 마쳤는지</b> 다시 한 번 확인해 주세요 — 데이터 백업 탭에서 나이스 양식에 기록을 반영하셨나요?</li>
-          <li><b>이 작업은 되돌릴 수 없습니다.</b> 마감 후에는 삭제된 기록을 다시 볼 방법이 없습니다.</li>
+          <li><b>이 작업은 되돌릴 수 없습니다.</b> 마감하면 기록·학생 명단뿐 아니라 <b>이 학교 코드 자체(설정, 접근권한, 변경 이력 등 전부)</b>가 삭제되고, 화면이 첫 화면으로 돌아갑니다.</li>
         </ul>
 
         <div className="closeout-backup-step">
@@ -5135,6 +5135,7 @@ function SemesterCloseoutConfirm({ studentCount, recordCount, onConfirm, onCance
         <div className="modal-body">
           <div className="closeout-confirm-big">기록 {recordCount}건이 영구히 삭제됩니다</div>
           <div className="closeout-confirm-big">학생 명단 {studentCount}명도 함께 삭제됩니다</div>
+          <div className="closeout-confirm-big">이 학교 코드 자체도 삭제되어, 첫 화면으로 돌아갑니다</div>
           <div className="closeout-confirm-warn">이 작업은 되돌릴 수 없습니다.</div>
           <label className="closeout-option closeout-confirm-check">
             <input type="checkbox" checked={understood} onChange={e => setUnderstood(e.target.checked)} />
@@ -5735,6 +5736,8 @@ function PapsStyles({ children }) {
         }
         .feature-updates-btn:hover { background: rgba(255,201,60,0.2); }
         .feature-update-group { margin-bottom: 16px; }
+        .device-guide-caution-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+        .device-guide-caution-list li { list-style: disc; }
         .feature-update-group h4 { font-family: 'Oswald', sans-serif; font-size: 14px; margin: 0 0 8px; color: var(--gold); }
         .feature-update-group ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
         .feature-update-group li { font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 2px; }
