@@ -339,6 +339,7 @@ function buildDefaultConfig(schoolLevel, viewerPassword, founderPassword) {
     students: [],
     criteria: buildDefaultCriteria(lvl),
     settings: { schoolName: "", schoolLevel: lvl, passGradeThreshold: 4, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
+    createdAt: Date.now(),
   };
 }
 
@@ -656,6 +657,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [toast, setToast] = useState(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [activeYear, setActiveYear] = useState(thisYear());
+  const [codeCreatedAt, setCodeCreatedAt] = useState(null);
+  const [justCreatedNotice, setJustCreatedNotice] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [presentationUnlocked, setPresentationUnlocked] = useState(false);
   const [lockPromptOpen, setLockPromptOpen] = useState(false);
@@ -964,6 +967,26 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       const cfg = await loadConfig(workspaceCode);
       const recs = await loadRecordsRemote(workspaceCode);
       const finalCfg = cfg || buildDefaultConfig(pendingSchoolLevelRef.current, pendingViewerPasswordRef.current, pendingFounderPasswordRef.current);
+      const backfilledCreatedAt = !finalCfg.createdAt;
+      if (backfilledCreatedAt) finalCfg.createdAt = Date.now(); // 이전 버전에 만들어진 코드는 지금부터 1년을 새로 센다
+
+      // 1년 넘게 방치된 코드는 마감을 깜빡 잊은 것으로 보고 자동으로 마감(전체 삭제)
+      // 처리한다. 기록이 쓸데없이 계속 쌓여 프로그램이 느려지는 것을 막기 위한 안전망이다.
+      const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+      if (role === "admin" && cfg && Date.now() - finalCfg.createdAt > ONE_YEAR_MS) {
+        await storage.delete(recordsKey(workspaceCode), true).catch(() => {});
+        await storage.delete(configKey(workspaceCode), true).catch(() => {});
+        await storage.delete(accessKey(workspaceCode), true).catch(() => {});
+        await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
+        await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
+        await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+        try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
+        showToast("이 코드가 개설된 지 1년이 지나 자동으로 마감(전체 삭제)되었습니다.", "warn");
+        setWorkspaceCode(null);
+        setRole(null);
+        setLoading(true);
+        return;
+      }
       if (!finalCfg.settings) finalCfg.settings = { schoolName: "", passGradeThreshold: 4 };
       if (!finalCfg.settings.currentYear) finalCfg.settings.currentYear = thisYear();
       const year = finalCfg.settings.currentYear;
@@ -971,12 +994,14 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       // 이전 버전(연도 구분 없는) 기록이 있다면 올해 기록으로 변환한다.
       const { records: migratedRecords, migrated } = migrateLegacyRecords(recs || {}, finalCfg.students || [], year);
 
-      if ((!cfg || migrated) && role === "admin") await saveConfigRemote(workspaceCode, finalCfg);
+      if ((!cfg || migrated || backfilledCreatedAt) && role === "admin") await saveConfigRemote(workspaceCode, finalCfg);
       if (migrated && role === "admin") await saveRecordsRemote(workspaceCode, migratedRecords);
+      if (!cfg && role === "admin") setJustCreatedNotice(true);
 
       setStudents(finalCfg.students || []);
       setCriteria(finalCfg.criteria || buildDefaultCriteria(finalCfg.settings?.schoolLevel));
       setSettings(finalCfg.settings);
+      setCodeCreatedAt(finalCfg.createdAt);
       setRecords(migratedRecords);
       // 연도 선택은 저장된 값이 아니라 "지금 실제 연도"로 항상 자동 설정한다. 저장된 값을
       // 그대로 쓰면, 작년에 만든 워크스페이스를 올해 다시 열었을 때 여전히 작년으로 남아있게 된다.
@@ -1229,6 +1254,17 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     setLoading(true);
   }, [role, workspaceCode, showToast]);
 
+  // "계속 쓸게요" — 자동 마감 경고가 뜬 코드를 아직 쓰고 있다면, 개설 시각을 지금으로
+  // 다시 잡아 1년을 새로 센다(수동 마감 없이 그대로 사용을 이어간다).
+  const extendCodeLifetime = useCallback(async () => {
+    if (role !== "admin") return;
+    const cfg = await loadConfig(workspaceCode);
+    const nextCfg = { ...(cfg || {}), students, criteria, settings, createdAt: Date.now() };
+    await saveConfigRemote(workspaceCode, nextCfg);
+    setCodeCreatedAt(nextCfg.createdAt);
+    showToast("계속 사용합니다. 자동 마감 기한이 1년 뒤로 다시 설정되었습니다.", "ok");
+  }, [role, workspaceCode, students, criteria, settings, showToast]);
+
   /* ---------- 계산 함수 (연도별) ---------- */
   const getBands = useCallback((eventId, gender, schoolGrade) => {
     if (!criteria) return null;
@@ -1454,6 +1490,14 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         )}
 
         {shareModalOpen && <ShareGuideModal workspaceCode={workspaceCode} onClose={() => setShareModalOpen(false)} />}
+        {justCreatedNotice && (
+          <CodeCreatedNoticeModal
+            workspaceCode={workspaceCode}
+            viewerPassword={settings.viewerPassword}
+            founderPassword={settings.founderPassword}
+            onClose={() => setJustCreatedNotice(false)}
+          />
+        )}
         {lockPromptOpen && (
           <BoardLockPrompt
             error={lockPromptError}
@@ -1473,6 +1517,23 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             <button className="icon-btn" onClick={() => setBannerDismissed(true)}><X size={14} /></button>
           </div>
         )}
+
+        {isFounder && !presentation && codeCreatedAt && (() => {
+          const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+          const daysLeft = Math.ceil((codeCreatedAt + ONE_YEAR_MS - Date.now()) / (24 * 60 * 60 * 1000));
+          if (daysLeft > 30) return null;
+          return (
+            <div className="info-banner warn-banner">
+              <AlertTriangle size={16} />
+              <span>
+                이 코드가 개설된 지 곧 1년이 됩니다. <b>{Math.max(daysLeft, 0)}일 후 자동으로
+                마감(기록·명단·설정 전체 삭제)</b>됩니다. 계속 쓰신다면 아래 버튼을 눌러
+                기한을 늘려주세요.
+              </span>
+              <button className="btn btn-secondary small" onClick={extendCodeLifetime}>계속 사용(1년 연장)</button>
+            </div>
+          );
+        })()}
 
         <div className="paps-body">
           {view === "board" && (
@@ -2507,6 +2568,56 @@ function BoardLockPrompt({ onUnlock, onCancel, error }) {
             <button className="btn btn-ghost" onClick={onCancel}>취소</button>
             <button className="btn btn-primary" onClick={() => onUnlock(pw)}>확인</button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword, onClose }) {
+  function downloadMemo() {
+    const lines = [
+      "SMART PAPS 학교 코드 메모",
+      "",
+      "학교 코드: " + workspaceCode,
+      "접근 신청 비밀번호(동료 교사용): " + (viewerPassword || "(설정 안 함)"),
+      "개설자 전용 비밀번호(본인만): " + (founderPassword || "(설정 안 함)"),
+      "",
+      "이 파일을 잃어버리면 비밀번호를 되찾을 방법이 없습니다. 안전한 곳에 보관하세요.",
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "smart-paps-" + workspaceCode + "-메모.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><CheckCircle2 size={18} color="var(--gold)" /> 코드가 만들어졌습니다</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="text-dim small-note">
+            이 코드와 비밀번호는 <b>이메일이나 계정이 없어 잊어버리면 되찾을 방법이 없습니다.</b>
+            아래 버튼으로 메모 파일을 받아 꼭 저장해 두세요(개인 노트, 클라우드 드라이브 등).
+          </div>
+          <div className="closeout-summary">
+            학교 코드: <b>{workspaceCode}</b><br />
+            접근 신청 비밀번호: <b>{viewerPassword || "설정 안 함"}</b><br />
+            개설자 전용 비밀번호: <b>{founderPassword || "설정 안 함"}</b>
+          </div>
+          <button className="btn btn-primary big-btn" onClick={downloadMemo}>
+            <Copy size={14} /> 메모 파일 다운로드
+          </button>
+          <button className="btn btn-ghost" onClick={onClose} style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
+            나중에 하기
+          </button>
         </div>
       </div>
     </div>
@@ -5926,6 +6037,8 @@ function PapsStyles({ children }) {
           background: rgba(46,196,182,0.1); color: #9FE6DE; font-size: 12px; border-bottom: 1px solid var(--line);
         }
         .info-banner .icon-btn { margin-left: auto; }
+        .warn-banner { background: rgba(232,93,93,0.12); color: #F2A5A5; }
+        .warn-banner button { margin-left: auto; flex-shrink: 0; }
 
         .btn {
           display: inline-flex; align-items: center; gap: 6px; padding: 10px 17px;
