@@ -1550,6 +1550,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [visitStats, setVisitStats] = useState(null);
+  const [manualOpen, setManualOpen] = useState(false);
 
   // 방문자 통계는 누구나 볼 수 있게 첫 화면에 그냥 표시한다.
   useEffect(() => {
@@ -1589,12 +1590,11 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             일일이 출력, 수기 기록, 재입력 하던 업무가<br />
             <b>첨부, 모바일 기록, 마감</b>으로 끝.
           </p>
+          <button className="manual-btn" onClick={() => setManualOpen(true)}>
+            <ClipboardList size={13} /> 사용설명서
+          </button>
           <div className="gate-divider" />
           <h2>우리 학교 코드 설정</h2>
-          <button className="gate-link-btn gate-link-btn-top" onClick={() => setMode("notice")}>
-            우리 학교 기록에 접근하려는 선생님이신가요? <span className="gate-link-cta">접근 신청 →</span>
-          </button>
-          <div className="gate-input-hint">조회, 기록 입력, 수정 권한에 대한 신청입니다.</div>
           <p className="gate-desc">
             측정을 시작하기 위한 학교코드를 작성해주세요.<br />
             무분별한 접근을 방지할 수 있습니다.
@@ -1616,13 +1616,18 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           </div>
           <input
             className="input big-input gate-input"
-            placeholder="예: 한빛중2026"
+            placeholder="예: 낭만체육123"
             value={value}
             onChange={e => setValue(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
           />
+          <div className="text-dim small-note gate-code-warn">
+            학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
+            알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
+            이름을 추천합니다.
+          </div>
           <div className="gate-pw-row">
-            <label>접근 신청 비밀번호</label>
+            <label>비밀번호 설정</label>
             <div className="pw-row">
               <input
                 className="input"
@@ -1648,6 +1653,12 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
               이미 등록되어 있는 학교코드라면 반영되지 않을 수 있습니다.
             </span>
           </div>
+          <button className="gate-link-btn" onClick={() => setMode("notice")}>
+            이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
+          </button>
+          <div className="gate-input-hint">
+            동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
+          </div>
           {visitStats && (
             <div className="visit-stats-row">
               <span>오늘 방문 <b>{visitStats.daily}</b></span>
@@ -1655,6 +1666,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             </div>
           )}
         </div>
+        {manualOpen && <UserManualModal onClose={() => setManualOpen(false)} />}
       </div>
     );
   }
@@ -1734,6 +1746,75 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   }
 
   return null;
+}
+
+function UserManualModal({ onClose }) {
+  const [codeNoteOpen, setCodeNoteOpen] = useState(false);
+  const [mobileNoteOpen, setMobileNoteOpen] = useState(false);
+  const steps = [
+    { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
+    { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 끌어다 놓으면 한 번에 등록됩니다." },
+    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다." },
+    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 등급과 합격 여부를 바로 확인할 수 있습니다." },
+    { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
+    { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다." },
+    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다." },
+  ];
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><ClipboardList size={18} color="var(--gold)" /> 사용설명서</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="text-dim small-note">처음 쓰시는 분도 이 순서만 따라 하시면 됩니다.</div>
+          {steps.map((s, i) => (
+            <div className="share-step" key={i}>
+              <span className="share-step-num">{i + 1}</span>
+              <div>
+                <div className="share-step-title">{s.title}</div>
+                <div className="share-step-body">{s.body}</div>
+                {i === 0 && (
+                  <>
+                    <button type="button" className="manual-note-btn" onClick={() => setCodeNoteOpen(v => !v)}>
+                      참고사항 {codeNoteOpen ? "▲" : "▼"}
+                    </button>
+                    {codeNoteOpen && (
+                      <div className="manual-note-box">
+                        학생 기록에는 학년·반·번호가 들어갑니다. 여기에 학교 이름까지 코드로
+                        알려지면, 그 학교 사정을 아는 사람은 "몇 학년 몇 반 몇 번이 누구인지"를
+                        비교적 쉽게 유추할 수 있습니다. 코드를 학교 이름과 무관하게 정하면, 이
+                        코드만으로는 어느 학교인지 알 수 없어 이런 위험을 줄일 수 있습니다.
+                      </div>
+                    )}
+                  </>
+                )}
+                {i === 2 && (
+                  <>
+                    <button type="button" className="manual-note-btn" onClick={() => setMobileNoteOpen(v => !v)}>
+                      참고사항 {mobileNoteOpen ? "▲" : "▼"}
+                    </button>
+                    {mobileNoteOpen && (
+                      <div className="manual-note-box">
+                        <b>스마트폰으로 기록하기</b>: 이 화면의 링크를 스마트폰 브라우저(사파리·크롬 등)로
+                        열고 학교 코드를 입력하면 노트북과 똑같이 기록을 입력할 수 있습니다.<br /><br />
+                        <b>홈 화면에 아이콘처럼 추가하기</b>: 브라우저의 공유 버튼 → "홈 화면에 추가"를
+                        누르면, 매번 링크를 찾지 않아도 앱처럼 아이콘을 눌러 바로 열립니다.<br /><br />
+                        다만 이건 <b>바로가기 아이콘</b>이라, 잠금화면이나 홈 화면에 실시간 순위 같은
+                        정보가 그대로 표시되는 &quot;위젯&quot;까지는 만들어지지 않습니다. 열면 화면이 뜨는
+                        정도로 이해해 주세요.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PendingApprovalScreen({ name, type, onCancel }) {
@@ -5495,7 +5576,14 @@ function PapsStyles({ children }) {
         .gate-pw-row { width: 100%; margin: 12px 0; text-align: left; }
         .gate-pw-row > label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
         .gate-pw-hint { margin-top: 6px; }
+        .gate-code-warn { text-align: left; margin: 6px 0 12px; }
         .gate-divider { width: 48px; height: 2px; background: var(--line); border-radius: 999px; margin: 6px 0 16px; }
+        .manual-btn {
+          display: inline-flex; align-items: center; gap: 5px; background: rgba(255,201,60,0.12);
+          border: 1px solid rgba(255,201,60,0.4); color: var(--gold); border-radius: 999px;
+          padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; margin-bottom: 4px;
+        }
+        .manual-btn:hover { background: rgba(255,201,60,0.22); }
         .gate-input { width: 100%; text-align: center; margin-bottom: 4px; }
         .gate-input-hint { font-size: 13px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
         .gate-note { display: flex; gap: 8px; text-align: left; font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-top: 14px; }
@@ -5513,7 +5601,6 @@ function PapsStyles({ children }) {
           transition: background 0.15s, border-color 0.15s;
         }
         .gate-link-btn:hover { background: rgba(255,255,255,0.07); border-color: var(--text-dim); }
-        .gate-link-btn-top { margin-top: 18px; margin-bottom: 2px; }
         .gate-link-cta { display: inline-block; margin-top: 2px; color: var(--gold); font-weight: 700; font-size: 14px; }
         @media (max-width: 420px) {
           .gate-input { font-size: 17px; }
@@ -6170,6 +6257,15 @@ function PapsStyles({ children }) {
         }
         .share-step-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
         .share-step-body { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+        .manual-note-btn {
+          background: none; border: none; color: var(--gold); font-size: 11px; font-weight: 600;
+          cursor: pointer; padding: 4px 0; margin-top: 2px;
+        }
+        .manual-note-box {
+          font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-top: 6px;
+          padding: 10px 12px; background: rgba(255,201,60,0.06); border: 1px solid rgba(255,201,60,0.25);
+          border-radius: 8px;
+        }
         .share-link-row { display: flex; gap: 8px; margin: 14px 0 8px; }
         .share-link-row .input { font-size: 12px; }
         .confirm-message { font-size: 13px; line-height: 1.6; color: var(--text); margin-bottom: 18px; }
