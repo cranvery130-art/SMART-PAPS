@@ -421,6 +421,22 @@ function saveLocalNameMap(code, map) {
   }
 }
 const ANONYMOUS_NAME_PLACEHOLDER = "(이름 미확인 - 이 기기)";
+// 화면이 알고 있는 학생 이름을 이 기기의 로컬 이름표에 즉시(동기적으로) 반영한다.
+// 이름을 입력/추가한 시점에 곧바로 호출해야 한다 — 네트워크 저장(Firestore 왕복)이 끝나길
+// 기다렸다가 반영하면, 그 사이에 탭을 닫아버릴 경우 이름이 이 기기에 전혀 남지 않게 된다
+// (localStorage.setItem 자체는 동기 함수라 즉시 호출하면 탭이 곧바로 닫혀도 안전하다).
+function syncLocalNameMap(code, students) {
+  if (!code || !Array.isArray(students)) return;
+  const nameMap = loadLocalNameMap(code);
+  let changed = false;
+  students.forEach(s => {
+    if (s.name && s.name !== ANONYMOUS_NAME_PLACEHOLDER && nameMap[s.id] !== s.name) {
+      nameMap[s.id] = s.name;
+      changed = true;
+    }
+  });
+  if (changed) saveLocalNameMap(code, nameMap);
+}
 
 async function loadConfig(code) {
   try {
@@ -442,11 +458,9 @@ async function saveConfigRemote(code, obj) {
     if (obj && Array.isArray(obj.students)) {
       // 저장 직전에, 이 화면이 알고 있는 이름을 이 기기의 이름표(로컬 저장소)에 먼저
       // 반영해 둔다 — 그래야 다음에 이 기기에서 다시 불러올 때도 이름이 유지된다.
-      const nameMap = loadLocalNameMap(code);
-      obj.students.forEach(s => {
-        if (s.name && s.name !== ANONYMOUS_NAME_PLACEHOLDER) nameMap[s.id] = s.name;
-      });
-      saveLocalNameMap(code, nameMap);
+      // (보통은 persistConfig에서 이미 더 일찍 동기적으로 반영해두지만, saveConfigRemote를
+      // 직접 호출하는 다른 경로 — 백업 파일 불러오기 등 — 를 위해 여기서도 한 번 더 반영한다.)
+      syncLocalNameMap(code, obj.students);
       // 서버(Firestore)로 나가는 값에는 이름 필드 자체를 아예 넣지 않는다.
       const anonStudents = obj.students.map(({ id, grade, classNum, number, gender }) => ({ id, grade, classNum, number, gender }));
       payload = { ...obj, students: anonStudents };
@@ -1114,6 +1128,11 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   // (화면 자체에서도 입력/관리 탭을 보여주지 않지만, 안전장치를 하나 더 둔다).
   const persistConfig = useCallback((nextStudents, nextCriteria, nextSettings) => {
     if (role !== "admin") return Promise.resolve();
+    // 이름을 입력/추가하자마자, 서버 저장(아래 큐)을 기다리지 않고 이 기기의 로컬 이름표에
+    // 곧바로(동기적으로) 반영해 둔다. 그렇지 않으면 아직 네트워크 왕복(loadConfig→
+    // saveConfigRemote) 중일 때 탭을 닫아버릴 경우 방금 입력한 이름이 이 기기에 전혀
+    // 저장되지 않아, 다시 열었을 때 "(이름 미확인 - 이 기기)"로 보이는 문제가 생긴다.
+    if (nextStudents !== undefined) syncLocalNameMap(workspaceCode, nextStudents);
     // 저장 직전에 서버의 최신 값을 한 번 더 받아와서, 지금 바꾸는 항목이 아닌 나머지는
     // 내 화면에 캐시된(어쩌면 오래된) 값이 아니라 최신 값을 그대로 유지한다. 엑셀 파일을
     // 연달아 여러 번 드래그하는 등 이 저장이 겹쳐 호출될 수 있으므로, 기록 저장과 같은
