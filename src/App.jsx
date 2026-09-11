@@ -5025,35 +5025,6 @@ const NEIS_FIELD_RULES = [
   { field: "bmi_height", label: "신장", test: h => /신장|키\(/.test(h) || /^키$/.test(h) },
   { field: "bmi_weight", label: "체중", test: h => /체중|몸무게/.test(h) },
 ];
-// 앉아윗몸앞으로굽히기·제자리멀리뛰기(1차/2차)와 악력(1차/2차 × 좌/우)은 종목 하나에
-// 실제로는 여러 열(시도 횟수·좌우)이 대응될 수 있다. guessNeisField가 자동으로 인식하는
-// "종목_시도" 형태의 세부 필드를 이 목록에서도 그대로 선택할 수 있어야, 자동 인식된 열이
-// 드롭다운에 실제로 표시되고(안 그러면 인식은 됐는데 화면엔 "이 열은 무시"로 잘못 보임),
-// 자동 인식이 빗나갔을 때 사람이 직접 세부 항목을 골라 바로잡을 수도 있다.
-const MULTI_PART_EVENT_IDS = ["sitreach", "longjump", "gripstrength"];
-const NEIS_FIELD_OPTIONS = [
-  { field: "", label: "(이 열은 무시)" },
-  { field: "student_grade", label: "학년" },
-  { field: "student_class", label: "반" },
-  { field: "student_number", label: "번호" },
-  { field: "student_name", label: "성명/이름" },
-  ...ALL_EVENTS.filter(e => e.id !== "bmi").map(e => ({
-    field: e.id,
-    label: MULTI_PART_EVENT_IDS.includes(e.id) ? e.name + " (최고기록 · 열이 하나뿐일 때)" : e.name,
-  })),
-  { field: "sitreach_1", label: "앉아윗몸앞으로굽히기 1차" },
-  { field: "sitreach_2", label: "앉아윗몸앞으로굽히기 2차" },
-  { field: "longjump_1", label: "제자리멀리뛰기 1차" },
-  { field: "longjump_2", label: "제자리멀리뛰기 2차" },
-  { field: "gripstrength_1_left", label: "악력 1차 왼쪽" },
-  { field: "gripstrength_1_right", label: "악력 1차 오른쪽" },
-  { field: "gripstrength_2_left", label: "악력 2차 왼쪽" },
-  { field: "gripstrength_2_right", label: "악력 2차 오른쪽" },
-  { field: "bmi_value", label: "BMI(신장·체중으로 자동 계산된 값)" },
-  { field: "bmi_height", label: "신장" },
-  { field: "bmi_weight", label: "체중" },
-];
-
 function guessNeisField(header) {
   const h = String(header || "");
   const hasTrial2 = /2차/.test(h);
@@ -5135,11 +5106,6 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
     processFile(e.dataTransfer.files?.[0]);
   }
 
-  function updateMapping(idx, field) {
-    setMapping(prev => prev.map((f, i) => (i === idx ? field : f)));
-    setResultRows(null);
-  }
-
   function applyFill() {
     const gradeCol = mapping.indexOf("student_grade");
     const classCol = mapping.indexOf("student_class");
@@ -5195,10 +5161,10 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
     <div className="panel">
       <h3>학교 시스템(나이스) 양식에 직접 반영하기</h3>
       <div className="text-dim small-note">
-        나이스에서 받은 진짜 양식 파일을 여기에 첨부하면, 이 프로그램의 기록을 열 이름에 맞춰
-        자동으로 채워줍니다. <b>어떤 열이 무엇으로 인식됐는지 꼭 확인하고</b>, 필요하면 아래에서
-        직접 바꾼 뒤 반영해 주세요. "신장"·"체중" 열은 입력한 값 그대로, "BMI" 열은
-        신장·체중으로 계산된 BMI 수치 자체가 채워집니다.
+        나이스에서 받은 진짜 양식 파일을 여기에 첨부한 뒤 "반영하기"를 누르면, 이 프로그램의
+        기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중" 열은 입력한 값 그대로,
+        "BMI" 열은 신장·체중으로 계산된 BMI 수치 자체가 채워집니다. <b>실제로 제출하시기
+        전에 아래 미리보기에서 값이 정확히 채워졌는지 꼭 확인해 주세요.</b>
       </div>
 
       <input id="neis-template-input" ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="visually-hidden-input" onChange={handleFile} />
@@ -5217,16 +5183,6 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
       {headerRow && (
         <>
           <div className="divider" />
-          <div className="neis-map-list">
-            {headerRow.map((h, idx) => (
-              <div className="neis-map-row" key={idx}>
-                <span className="neis-map-header">{h || "(빈 열)"}</span>
-                <select className="select" value={mapping[idx] || ""} onChange={e => updateMapping(idx, e.target.value)}>
-                  {NEIS_FIELD_OPTIONS.map(o => <option key={o.field} value={o.field}>{o.label}</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
           <button className="btn btn-primary" onClick={applyFill}><Check size={14} /> 반영하기</button>
 
           {resultRows && (
@@ -6750,13 +6706,7 @@ function PapsStyles({ children }) {
           background: rgba(255,255,255,0.05); border: 1px dashed var(--line); border-radius: 8px;
           padding: 10px 12px; font-size: 13px; color: var(--text); line-height: 1.6;
         }
-        .neis-map-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; max-height: 360px; overflow-y: auto; padding-right: 4px; }
-        .neis-map-row { display: grid; grid-template-columns: 1fr 180px; gap: 10px; align-items: center; padding: 6px 0; }
-        .neis-map-header { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .neis-preview-wrap { margin: 12px 0; }
-        @media (max-width: 600px) {
-          .neis-map-row { grid-template-columns: 1fr; }
-        }
 
         /* ================= 챔피언십 모드(테마) ================= */
         .theme-toggle-btn.on { color: var(--gold); border-color: var(--gold); }
