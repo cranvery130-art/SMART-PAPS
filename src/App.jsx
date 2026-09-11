@@ -4,7 +4,7 @@ import {
   ClipboardList, Monitor, X, Maximize2, Minimize2, AlertTriangle,
   CheckCircle2, XCircle, Info, Play,
   RotateCcw, Square, Smartphone, Copy,
-  FileSpreadsheet, Check, ShieldCheck, Database, Award, Download
+  FileSpreadsheet, Check, ShieldCheck, Database, Award
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { storage } from "./storage.js";
@@ -1217,7 +1217,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 
   // 무료 요금제 등 자동 저장이 안 되는 환경을 위한 수동 백업/복원.
   const handleImportBackup = useCallback(async (payload) => {
-    if (role !== "admin") return;
+    if (role !== "admin" || !isFounder) return;
     const nextStudents = payload.students || [];
     const nextSettings = payload.settings || { schoolName: "", passGradeThreshold: 4, currentYear: thisYear() };
     const nextCriteria = payload.criteria || buildDefaultCriteria(nextSettings.schoolLevel);
@@ -1231,7 +1231,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     await saveRecordsRemote(workspaceCode, nextRecords);
     setLastSync(Date.now());
     showToast("백업 파일을 불러왔습니다.", "ok");
-  }, [role, workspaceCode, showToast]);
+  }, [role, isFounder, workspaceCode, showToast]);
 
   // 학기 마감: 나이스 제출 등 사용 목적을 다한 뒤, 학생 개인정보를 계속 저장해둘 필요가
   // 없도록 기록·학생 명단뿐 아니라 이 학교 코드 자체(설정·접근권한·이력 등 전부)를 완전히
@@ -1611,6 +1611,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               showToast={showToast}
               workspaceCode={workspaceCode}
               myDisplayName={myDisplayName}
+              isFounder={isFounder}
             />
           )}
           {view === "closeout" && role === "admin" && isFounder && (
@@ -1995,10 +1996,10 @@ function UserManualModal({ onClose }) {
                         그 기기에도 이름이 채워집니다.<br /><br />
                         <b>전광판 화면</b>은 어느 기기에서 보든 이름 대신 [학년-반-번호] 형태로만
                         표시됩니다(개인정보 보호를 위해 항상 가림).<br /><br />
-                        <b>이름이 그대로 들어가는 곳</b>: 데이터 백업의 "실명포함(교사보관용)" 옵션,
-                        나이스 제출용 엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을
-                        채워 넣으며, 실명이 필요한 목적이라 의도적으로 포함시킵니다. 다른 사람과
-                        공유할 땐 백업의 "익명화(외부공유용)" 옵션을 쓰면 이름 없이 내보낼 수 있어요.
+                        <b>이름이 그대로 들어가는 곳</b>: 데이터 백업(JSON) 파일, 나이스 제출용
+                        엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을 채워 넣으며,
+                        실명이 필요한 목적이라 의도적으로 포함시킵니다. JSON 백업은 여러 명이
+                        각자 백업하면 혼선이 생길 수 있어 개설자만 내보내고 불러올 수 있습니다.
                       </div>
                     )}
                   </>
@@ -2420,12 +2421,18 @@ function DeviceSyncGuideModal({ onClose }) {
       title: "동료 교사가 다른 기기에서 다시 들어와야 할 때",
       body: "이미 승인받은 것과 똑같은 이름 + 똑같은 권한 종류(수정 권한/조회)로 접근 신청을 다시 하면, 처음부터 다시 승인을 기다리지 않고 기존 승인을 그대로 이어받습니다. 이름을 정확히 똑같이 입력하는 게 중요해요.",
     },
+    {
+      title: "1년 지난 코드는 자동으로 마감됩니다",
+      body: "마감(전체 데이터 삭제)을 깜빡 잊고 넘어가는 경우를 대비해, 코드를 개설한 지 1년이 지나면 자동으로 마감 처리되어 기록·명단·설정이 모두 삭제되고 첫 화면으로 돌아갑니다. 만료 30일 전부터 개설자에게 경고 배너가 뜨고, 계속 쓰실 거라면 \"계속 사용(1년 연장)\" 버튼으로 기한을 늘릴 수 있습니다.",
+    },
   ];
   const cautions = [
     "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보가 사라져 다시 접근 절차를 밟아야 할 수 있습니다.",
     "같은 이름을 쓰는 동료 교사가 두 명 이상이면, 위 \"기존 승인 이어받기\" 기능 때문에 서로 같은 자리를 나눠 쓰게 될 수 있어요. 이름에 학년·반처럼 구분되는 정보를 꼭 포함해 주세요.",
     "개설자 전용 비밀번호는 동료 교사에게 알려주지 마세요 — 이걸 아는 사람은 승인 절차 없이 곧바로 전체 권한을 갖게 됩니다.",
+    "JSON 백업(내보내기·불러오기)은 개설자 기기에서만 할 수 있습니다. 여러 기기에서 각자 백업·복원하면 서로 다른 시점의 기록이 뒤섞일 수 있어, 백업은 개설자 한 명이 맡는 것을 권장합니다.",
     "인터넷 연결이 끊긴 상태에서 입력한 기록은 연결이 복구되어야 다른 기기에 반영됩니다.",
+    "1년 자동 마감은 되돌릴 수 없습니다. 계속 쓰실 코드라면 경고 배너가 뜰 때 꼭 \"계속 사용(1년 연장)\"을 눌러주세요.",
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2493,10 +2500,11 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
     {
       title: "데이터 관리",
       items: [
-        "백업 파일로 데이터 손실 위험 최소화",
+        "백업 파일로 데이터 손실 위험 최소화 — 여러 명이 각자 백업·복원하면 최신 기록이 뒤섞일 수 있어 개설자만 가능",
         "나이스 측정명단 양식 엑셀 파일 첨부로 명단 반영 — 학생관리에서 파일만 올리면 학년·반·번호·이름을 자동으로 채워줌",
         "나이스 '자료올리기'용 엑셀 형식 지원 — 프로그램 내 기록을 토대로 나이스 업로드 양식에 맞춰 채워줌",
         "마감 시 백업 필수화로 학생 개인정보 최소 보관",
+        "1년 지난 코드는 자동 마감 — 마감을 깜빡 잊어도 개설 1년 후 자동으로 전체 삭제되어 기록이 쌓이지 않음(만료 30일 전부터 경고, 연장 가능)",
       ],
     },
     {
@@ -5152,7 +5160,7 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
   );
 }
 
-function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName }) {
+function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName, isFounder }) {
   const [pendingImport, setPendingImport] = useState(null);
   const importInputRef = useRef(null);
   const [backupLog, setBackupLog] = useState(null);
@@ -5177,28 +5185,6 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
     const entry = { ts: Date.now(), by: myDisplayName };
     appendBackupLog(workspaceCode, entry);
     setBackupLog(prev => [entry, ...(prev || [])]);
-  }
-
-  // 외부 공유용(익명화) 내보내기: 학생 실명 대신 "[1학년 1반 2번]" 형태의 표시용 라벨만
-  // 담아, 이 파일만으로는 어떤 학생인지 알 수 없게 만든다. 교육청 제출·통계 공유 등
-  // 실명이 필요 없는 용도로 파일을 넘길 때 사용한다.
-  function exportAnonymizedBackup() {
-    const anonStudents = students.map(s => ({
-      id: s.id, grade: s.grade, classNum: s.classNum, number: s.number, gender: s.gender,
-      label: `${s.grade}학년 ${s.classNum}반 ${s.number}번`,
-    }));
-    const payload = { exportedAt: Date.now(), anonymized: true, students: anonStudents, criteria, settings, records };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const dateStr = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = "paps-backup-익명화-" + (settings.schoolName || "data") + "-" + dateStr + ".json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast("익명화된 백업 파일을 다운로드했습니다. (이 파일은 다시 불러오기에는 쓸 수 없어요)", "ok");
   }
 
   function handleImportFile(e) {
@@ -5238,6 +5224,13 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 
       <div className="panel">
         <h3>백업 파일(JSON)</h3>
+        {!isFounder ? (
+          <div className="text-dim small-note">
+            JSON 백업(내보내기·불러오기)은 개설자만 할 수 있습니다. 여러 명이 각자 따로
+            백업하고 불러오면 서로 다른 시점의 기록이 뒤섞여 최신 데이터가 덮어써질 수
+            있어서, 혼선을 막기 위해 개설자 한 명으로만 창구를 좁혀두었습니다.
+          </div>
+        ) : (
         <div className="backup-steps">
           <div className="backup-step">
             <span className="backup-step-num">1</span>
@@ -5245,8 +5238,6 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
               <div className="backup-step-title">저장하기</div>
               <div className="text-dim small-note">아래 버튼을 누르면 파일이 저장됩니다.</div>
               <button className="btn btn-secondary" onClick={exportBackup}><Copy size={14} /> JSON으로 내보내기 (교사 보관용, 실명 포함)</button>
-              {" "}
-              <button className="btn btn-ghost" onClick={exportAnonymizedBackup}><Download size={14} /> 익명화해서 내보내기 (외부 공유용)</button>
               {backupLog && (
                 backupLog.length === 0 ? (
                   <div className="text-dim small-note backup-log-empty">아직 내보낸 기록이 없습니다.</div>
@@ -5278,15 +5269,18 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
             </div>
           </div>
         </div>
+        )}
+        {isFounder && (
         <div className="warn-note">
           <AlertTriangle size={16} />
-          <span>"교사 보관용" 파일은 학생 이름·기록이 그대로 담겨 있으니 개인 기기 등 안전한 곳에만 보관하고 다 쓴 옛 파일은 삭제해 주세요. "외부 공유용(익명화)" 파일은 이름 대신 "1학년 1반 2번"처럼 학급·번호만 담기며, 다시 불러오기에는 쓸 수 없습니다.</span>
+          <span>학생 이름·기록이 담긴 파일입니다. 개인 기기 등 안전한 곳에만 보관하고, 다 쓴 옛 파일은 삭제해 주세요.</span>
         </div>
+        )}
       </div>
 
       <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} />
 
-      {pendingImport && (
+      {pendingImport && isFounder && (
         <ConfirmModal
           title="백업 파일 불러오기"
           message={`이 파일로 불러오면 현재 학생 ${students.length}명의 데이터가 백업 파일 속 학생 ${pendingImport.students.length}명 데이터로 완전히 대체됩니다. 계속할까요?`}
