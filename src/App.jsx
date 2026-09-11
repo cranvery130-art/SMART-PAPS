@@ -4,7 +4,7 @@ import {
   ClipboardList, Monitor, X, Maximize2, Minimize2, AlertTriangle,
   CheckCircle2, XCircle, Info, Play,
   RotateCcw, Square, Smartphone, Copy,
-  FileSpreadsheet, Check, ShieldCheck, Database, Award
+  FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { storage } from "./storage.js";
@@ -101,6 +101,17 @@ function mergeRecords(local, polled) {
 
 function thisYear() {
   return new Date().getFullYear();
+}
+
+// 실시간 측정 중 프로젝터·대형화면에 학생 이름이 그대로 노출되는 것을 막기 위한 이름
+// 마스킹("이름 마스킹 모드" 토글에서 사용). 2글자면 뒷글자, 3글자 이상이면 가운데 글자(들)를
+// 가린다(예: "김민" → "김*", "홍길동" → "홍*동", "황보영수" → "황**수"). 1글자 이름은 그대로 둔다.
+function maskStudentName(name) {
+  if (!name) return name;
+  const chars = Array.from(String(name));
+  if (chars.length <= 1) return name;
+  if (chars.length === 2) return chars[0] + "*";
+  return chars[0] + "*".repeat(chars.length - 2) + chars[chars.length - 1];
 }
 
 function fmtValue(v, unit) {
@@ -684,6 +695,10 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [presentationUnlocked, setPresentationUnlocked] = useState(false);
   const [lockPromptOpen, setLockPromptOpen] = useState(false);
   const [lockPromptError, setLockPromptError] = useState("");
+  // 공용 PC 자동 잠금(세션 타임아웃): 일정 시간 조작이 없으면 화면을 잠근다.
+  const [idleLocked, setIdleLocked] = useState(false);
+  const [idleLockError, setIdleLockError] = useState("");
+  const lastActivityRef = useRef(Date.now());
 
   const prevTopRef = useRef({});
   const configVersionRef = useRef(0);
@@ -713,6 +728,45 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       setPresentation(false);
     } else {
       setLockPromptError("비밀번호가 올바르지 않습니다.");
+    }
+  }
+
+  // 공용 PC(체육관·교무실 공용 컴퓨터 등)에 로그인된 채로 방치되어 다른 사람이 학생
+  // 개인정보에 접근하는 것을 막기 위한 자동 잠금. 로그인(코드 확인)이 끝난 뒤부터, 화면
+  // 조작(마우스·키보드·터치·스크롤)이 일정 시간(12분) 없으면 자동으로 잠긴다. 전광판
+  // 모드는 애초에 계속 켜두는 용도이고 이미 자체 잠금이 있으므로 이 타이머 대상에서
+  // 제외한다. 접근 신청 비밀번호가 설정되어 있지 않으면(=잠글 방법이 없으면) 아예
+  // 타이머를 켜지 않는다(그렇지 않으면 아무도 못 푸는 상태로 잠겨버릴 수 있다).
+  const IDLE_TIMEOUT_MS = 12 * 60 * 1000;
+  useEffect(() => {
+    if (presentation) return;
+    if (role !== "admin" && role !== "viewer") return;
+    if (!settings.viewerPassword) return;
+
+    lastActivityRef.current = Date.now();
+    const markActive = () => { lastActivityRef.current = Date.now(); };
+    const activityEvents = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "wheel"];
+    activityEvents.forEach(ev => window.addEventListener(ev, markActive, { passive: true }));
+
+    const timer = setInterval(() => {
+      if (Date.now() - lastActivityRef.current >= IDLE_TIMEOUT_MS) {
+        setIdleLocked(true);
+      }
+    }, 15000);
+
+    return () => {
+      activityEvents.forEach(ev => window.removeEventListener(ev, markActive));
+      clearInterval(timer);
+    };
+  }, [role, presentation, settings.viewerPassword]);
+
+  function handleIdleUnlockAttempt(pw) {
+    if (pw && settings.viewerPassword && pw === settings.viewerPassword) {
+      setIdleLocked(false);
+      setIdleLockError("");
+      lastActivityRef.current = Date.now();
+    } else {
+      setIdleLockError("비밀번호가 올바르지 않습니다.");
     }
   }
 
@@ -1548,6 +1602,12 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             onCancel={() => { setLockPromptOpen(false); setLockPromptError(""); }}
           />
         )}
+        {idleLocked && (
+          <IdleLockScreen
+            error={idleLockError}
+            onUnlock={handleIdleUnlockAttempt}
+          />
+        )}
 
         {!bannerDismissed && !presentation && (
           <div className="info-banner">
@@ -1985,11 +2045,11 @@ function UserManualModal({ onClose }) {
   const steps = [
     { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
     { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 끌어다 놓으면 한 번에 등록됩니다." },
-    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다." },
+    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다. 체육관 등에서 화면을 여러 학생이 함께 보는 상황이라면, 화면 위쪽의 \"이름 가림\" 버튼을 눌러 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력할 수 있습니다." },
     { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
     { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
-    { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다." },
-    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다." },
+    { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다. 다운로드하면 삭제 안내 팝업이 함께 뜨니, 나이스 등록을 마쳤다면 컴퓨터에서 바로 지워주세요." },
+    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 이때 받는 백업 파일(.json)도 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2000,6 +2060,12 @@ function UserManualModal({ onClose }) {
         </div>
         <div className="modal-body">
           <div className="text-dim small-note">처음 쓰시는 분도 이 순서만 따라 하시면 됩니다.</div>
+          <div className="text-dim small-note">
+            <b>공용 PC 자동 잠금</b>: 접근 신청 비밀번호를 설정해 두면, 로그인 후 약 12분간
+            마우스·키보드 조작이 없을 때 화면이 자동으로 잠기고 비밀번호를 다시 입력해야
+            계속 쓸 수 있습니다. 체육관·교무실처럼 여러 사람이 함께 쓰는 컴퓨터에서 자리를
+            비웠을 때 학생 정보가 그대로 노출되는 것을 막기 위한 기능입니다.
+          </div>
           {steps.map((s, i) => (
             <div className="share-step" key={i}>
               <span className="share-step-num">{i + 1}</span>
@@ -2528,6 +2594,9 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
         "누가 언제 무엇을 바꿨는지 전부 기록 — 문제 발생 시 추적 가능",
         "승인·비밀번호 변경·마감 같은 민감한 조작은 개설자 1인만 — 통제된 접근 구조",
         "빔프로젝터 고정모드를 켜면 그 순간부터 자동으로 화면 잠김 — 교사가 자리를 비운 사이 학생의 임의 조작·확인 방지",
+        "공용 PC 자동 잠금(세션 타임아웃) — 로그인 후 약 12분간 조작이 없으면 화면이 자동으로 잠기고, 계속 쓰려면 비밀번호를 다시 입력해야 함",
+        "실시간 측정 중 이름 가림 모드 — 기록관리 화면에서 버튼 하나로 학생 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력 가능",
+        "다운로드한 파일 삭제 안내 — 나이스 반영·백업(엑셀/JSON) 파일을 내려받을 때마다, 등록을 마쳤다면 컴퓨터에서 삭제해 달라는 안내가 뜸",
       ],
     },
     {
@@ -2617,6 +2686,43 @@ function BoardLockPrompt({ onUnlock, onCancel, error }) {
           <div className="confirm-actions">
             <button className="btn btn-ghost" onClick={onCancel}>취소</button>
             <button className="btn btn-primary" onClick={() => onUnlock(pw)}>확인</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 공용 PC(체육관·교무실 공용 컴퓨터 등)에 마감 처리 전 상태로 화면이 켜진 채 방치되는 것을
+// 막기 위한 자동 잠금. 한동안(10~15분) 마우스·키보드 조작이 없으면 화면을 잠그고, 접근 신청
+// 비밀번호를 다시 입력해야 계속 쓸 수 있게 한다. 뒤로가기/닫기로 우회할 수 없도록 "취소"
+// 버튼을 두지 않는다(단, 브라우저를 새로고침하면 다시 열릴 수 있음 — 이 프로그램 전체가
+// "코드를 아는 사람은 접근 가능" 수준의 보안이라는 점과 같은 한계).
+function IdleLockScreen({ onUnlock, error }) {
+  const [pw, setPw] = useState("");
+  return (
+    <div className="modal-backdrop idle-lock-backdrop">
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><ShieldCheck size={18} /> 자동 잠금</h3>
+        </div>
+        <div className="modal-body">
+          <div className="text-dim small-note">
+            일정 시간 조작이 없어 화면이 자동으로 잠겼습니다(공용 PC에서 학생 개인정보 노출을
+            막기 위한 기능). 계속하려면 접근 신청 비밀번호를 입력해 주세요.
+          </div>
+          <input
+            className="input"
+            type="password"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            placeholder="접근 신청 비밀번호"
+            onKeyDown={e => { if (e.key === "Enter") onUnlock(pw); }}
+            autoFocus
+          />
+          {error && <div className="gate-error">{error}</div>}
+          <div className="confirm-actions">
+            <button className="btn btn-primary" onClick={() => onUnlock(pw)}>잠금 해제</button>
           </div>
         </div>
       </div>
@@ -3161,6 +3267,11 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
   const ev = EVENT_MAP[eventId];
   const skippedEvents = settings.skippedEvents || [];
   const schoolGrades = gradesForLevel(settings.schoolLevel || "middle");
+  // 체육관 등에서 프로젝터·대형화면에 이 화면을 띄운 채 측정할 때, 학생 이름이 그대로
+  // 노출되지 않도록 "김*동" 형태로 가리는 모드. 기본은 꺼짐(평소 입력 편의를 위해 실명
+  // 표시), 필요할 때만 교사가 켠다. 화면을 새로고침하면 다시 꺼짐 상태로 돌아온다(측정
+  // 세션마다 매번 의식적으로 켜도록 하기 위함).
+  const [maskNames, setMaskNames] = useState(false);
   // BMI 입력 화면에서 학생마다 하나씩 "직접 입력" 체크박스를 누르지 않아도, 버튼 하나로
   // 현재 보이는 반 전체를 한 번에 전체선택/전체해제할 수 있게 하기 위한 신호(epoch가 바뀔
   // 때마다 BmiRow들이 자신의 직접입력 모드를 forceValue로 맞춘다). 그 이후 개별 학생이
@@ -3223,8 +3334,20 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
 
   const drillDown = (
     <div className="panel drill-panel">
-      <h3>학년 · 반별 기록 입력 <span className="board-cat">({ev.name}{ev.unit ? ", " + ev.unit : ""})</span></h3>
+      <div className="drill-panel-head">
+        <h3>학년 · 반별 기록 입력 <span className="board-cat">({ev.name}{ev.unit ? ", " + ev.unit : ""})</span></h3>
+        <button
+          type="button"
+          className={"btn btn-secondary small mask-toggle-btn" + (maskNames ? " active" : "")}
+          onClick={() => setMaskNames(v => !v)}
+          title="체육관 등 화면을 여러 사람이 함께 보는 상황에서, 학생 이름을 가려서 입력할 수 있어요."
+        >
+          {maskNames ? <EyeOff size={14} /> : <Eye size={14} />}
+          {maskNames ? "이름 가림: 켜짐" : "이름 가림: 꺼짐"}
+        </button>
+      </div>
       <div className="text-dim small-note">아래 학년·반 버튼을 눌러 학생을 고르세요. 숫자는 "입력 완료 인원 / 전체 인원"을 뜻합니다.</div>
+      {maskNames && <div className="text-dim small-note">이름을 "홍*동" 형태로 가리는 중입니다. 학번(번호) 순서는 그대로 보이니, 번호로 학생을 확인해 주세요.</div>}
       <div className="drill-row">
         {schoolGrades.map(g => (
           <button key={g} className={"drill-chip" + (grade === g ? " active" : "")} onClick={() => { setGrade(g); setClassNum(null); }}>
@@ -3263,7 +3386,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
           {classStudents.length === 0 && <div className="text-dim">학생이 없습니다.</div>}
           {classStudents.map(s => (
             <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"}
-              forceDirectMode={eventId === "bmi" ? { epoch: bmiDirectEpoch, value: bmiDirectForceValue } : undefined} />
+              forceDirectMode={eventId === "bmi" ? { epoch: bmiDirectEpoch, value: bmiDirectForceValue } : undefined} maskNames={maskNames} />
           ))}
         </div>
       )}
@@ -3321,7 +3444,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
             {eventId === "fifty_m" ? (
               <FiftyMGroupTimer eventId={eventId} students={students} activeYear={activeYear} onSave={onSave} showToast={showToast} schoolGrades={schoolGrades} />
             ) : eventId === "run_walk" ? (
-              <ClassRunTimer eventId={eventId} students={students} activeYear={activeYear} onSave={onSave} showToast={showToast} />
+              <ClassRunTimer eventId={eventId} students={students} activeYear={activeYear} onSave={onSave} showToast={showToast} maskNames={maskNames} />
             ) : (
               <div className="text-dim small-note">이 종목은 별도 보조 도구가 없습니다. 아래에서 학년·반을 골라 바로 기록을 입력하세요.</div>
             )}
@@ -3370,7 +3493,7 @@ function EventInputRow(props) {
 // 스텝검사: 매뉴얼 실시방법 그대로, 스텝운동 종료 후 1분·2분·3분 시점의 심박수 3회를
 // 입력하면 심폐효율지수(PEI = 운동지속시간(초)×100 / (2×맥박수 합), 0.01단위에서 올림해 0.1단위로
 // 기록)를 자동 계산해 저장한다. 운동지속시간은 매뉴얼 규정대로 3분(180초) 완주를 기준으로 한다.
-function StepTestRow({ student, activeYear, studentValue, studentParts, onSave }) {
+function StepTestRow({ student, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const eventId = "step_test";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3400,7 +3523,7 @@ function StepTestRow({ student, activeYear, studentValue, studentParts, onSave }
 
   return (
     <div className="drill-student-row step-test-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="1" value={hr1} placeholder="1분 심박수"
         onChange={e => setHr1(e.target.value)} onBlur={() => commit(hr1, hr2, hr3)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <input className="input drill-student-input" type="number" step="1" value={hr2} placeholder="2분 심박수"
@@ -3422,7 +3545,7 @@ const FLEX_TOTAL_PARTS = [
   { key: "lower", label: "하체" },
 ];
 
-function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave }) {
+function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const eventId = "flex_total";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3461,7 +3584,7 @@ function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave 
 
   return (
     <div className="drill-student-row flex-total-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       {FLEX_TOTAL_PARTS.map(p => (
         <div className="flex-part-group" key={p.key}>
           <span className="flex-part-label">{p.label}</span>
@@ -3483,7 +3606,7 @@ function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave 
     </div>
   );
 }
-function SimpleRow({ student, eventId, activeYear, studentValue, onSave }) {
+function SimpleRow({ student, eventId, activeYear, studentValue, onSave, maskNames }) {
   const ev = EVENT_MAP[eventId];
   const existing = studentValue(student.id, eventId, activeYear);
   const [value, setValue] = useState(existing === null ? "" : String(existing));
@@ -3502,7 +3625,7 @@ function SimpleRow({ student, eventId, activeYear, studentValue, onSave }) {
 
   return (
     <div className="drill-student-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input
         className="input drill-student-input"
         type="number"
@@ -3519,7 +3642,7 @@ function SimpleRow({ student, eventId, activeYear, studentValue, onSave }) {
 }
 
 // 앉아윗몸앞으로굽히기 · 제자리멀리뛰기: 2회 측정해서 더 좋은 값을 기록에 반영한다.
-function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts, onSave }) {
+function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const ev = EVENT_MAP[eventId];
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3550,7 +3673,7 @@ function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts,
 
   return (
     <div className="drill-student-row two-trial">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={t1} placeholder={"1차" + (ev.unit ? "(" + ev.unit + ")" : "")}
         onChange={e => setT1(e.target.value)} onBlur={() => commit(t1, t2)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <input className="input drill-student-input" type="number" step="0.1" value={t2} placeholder={"2차" + (ev.unit ? "(" + ev.unit + ")" : "")}
@@ -3562,7 +3685,7 @@ function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts,
 }
 
 // 악력: 좌/우 각 2회씩 측정 → 각 손의 최고값을 구해 평균한 값을 기록에 반영한다.
-function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
+function GripRow({ student, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const eventId = "gripstrength";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3600,7 +3723,7 @@ function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
 
   return (
     <div className="drill-student-row grip-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={l1} placeholder="1차 좌"
         onChange={e => setL1(e.target.value)} onBlur={() => commit(l1, r1, l2, r2)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <input className="input drill-student-input" type="number" step="0.1" value={r1} placeholder="1차 우"
@@ -3619,7 +3742,7 @@ function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
 }
 
 // BMI: 신장·체중만 입력하면 자동 계산. 등급을 매기지 않고 또래 평균 대비 위치만 안내한다.
-function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel, forceDirectMode }) {
+function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel, forceDirectMode, maskNames }) {
   const eventId = "bmi";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3670,7 +3793,7 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
 
   return (
     <div className="drill-student-row bmi-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       {directMode ? (
         <input className="input drill-student-input" type="number" step="0.1" value={directValue} placeholder="BMI 수치"
           onChange={e => setDirectValue(e.target.value)} onBlur={() => commitDirect(directValue)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
@@ -3693,7 +3816,7 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
 
 // 체지방률: 값 하나만 입력. BMI와 동일하게 등급을 매기지 않고, 종합등급에도 반영되지 않는
 // 성장 확인용 참고 지표다(공식 학년·성별 기준표가 없어 분류 문구는 따로 붙이지 않는다).
-function BodyFatRow({ student, activeYear, studentValue, onSave }) {
+function BodyFatRow({ student, activeYear, studentValue, onSave, maskNames }) {
   const eventId = "bodyfat";
   const existing = studentValue(student.id, eventId, activeYear);
   const [value, setValue] = useState(existing === null ? "" : String(existing));
@@ -3714,7 +3837,7 @@ function BodyFatRow({ student, activeYear, studentValue, onSave }) {
 
   return (
     <div className="drill-student-row bodyfat-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={value} placeholder="체지방률(%)"
         onChange={e => setValue(e.target.value)} onBlur={() => commit(value)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? existing + "%" : "-"}</span>
@@ -4136,7 +4259,7 @@ function TrackCourseCalculator({ students, schoolGrades, schoolLevel }) {
   );
 }
 
-function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
+function ClassRunTimer({ eventId, students, activeYear, onSave, showToast, maskNames }) {
   const [grade, setGrade] = useState(null);
   const [classNum, setClassNum] = useState(null);
   const [running, setRunning] = useState(false);
@@ -4241,7 +4364,7 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
               <div className="class-run-grid">
                 {remaining.map(s => (
                   <button key={s.id} className="class-run-btn" disabled={!running} onClick={() => markFinish(s)}>
-                    {s.number}. {s.name}
+                    {s.number}. {maskNames ? maskStudentName(s.name) : s.name}
                   </button>
                 ))}
                 {remaining.length === 0 && <div className="text-dim small-note">전원 완주했습니다.</div>}
@@ -4252,7 +4375,7 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
               <div className="class-run-finished-list">
                 {finished.map(s => (
                   <div className="class-run-finished-row" key={s.id}>
-                    <span className="class-run-finished-name">{s.number}. {s.name}</span>
+                    <span className="class-run-finished-name">{s.number}. {maskNames ? maskStudentName(s.name) : s.name}</span>
                     <input
                       className="input class-run-time-input"
                       type="number"
@@ -5097,6 +5220,7 @@ function neisFieldValue(student, field, records, activeYear) {
 function NeisTemplateFiller({ students, records, activeYear, showToast, fillState, setFillState }) {
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false); // 드래그 중인지 여부는 탭을 오가며 유지할 필요가 없는 순간 UI 상태라 그대로 로컬로 둔다.
+  const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
   // 첨부파일명·인식된 헤더·반영결과 등은 상위(PapsApp)에서 내려주는 fillState에 둬서,
   // 데이터백업 탭을 벗어났다가 다시 돌아와도 사라지지 않는다.
   const { fileName, headerRow, dataRows, mapping, resultRows, sheetName } = fillState;
@@ -5192,6 +5316,7 @@ function NeisTemplateFiller({ students, records, activeYear, showToast, fillStat
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     XLSX.writeFile(wb, (fileName.replace(/\.xlsx?$/i, "") || "나이스양식") + "_반영_" + dateStr + ".xlsx");
     showToast("파일을 다운로드했습니다.", "ok");
+    setShowDeleteReminder(true);
   }
 
   return (
@@ -5243,6 +5368,36 @@ function NeisTemplateFiller({ students, records, activeYear, showToast, fillStat
           )}
         </>
       )}
+      {showDeleteReminder && <DownloadDeleteReminderModal onClose={() => setShowDeleteReminder(false)} />}
+    </div>
+  );
+}
+
+// 학생 개인정보(이름·기록 등)가 담긴 파일을 방금 내려받은 직후 한 번 보여주는 파기 안내.
+// 나이스 반영, 백업(JSON), 마감 전 백업 세 곳에서 공통으로 쓴다. 앱 내부 데이터는 "마감"으로
+// 지울 수 있어도, 한 번 내려받아 교사 PC 다운로드 폴더에 남은 파일은 이 프로그램이 지울 수
+// 없어 별도의 유출 통로가 될 수 있기 때문에, 다운로드 시점마다 삭제를 상기시킨다.
+function DownloadDeleteReminderModal({ onClose }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><ShieldCheck size={18} /> 다운로드한 파일 삭제 안내</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="text-dim small-note">
+            방금 내려받은 파일에는 학생 이름 등 개인정보가 들어 있습니다. 나이스 등록(또는
+            필요한 처리)을 마쳤다면, 컴퓨터에 남겨두지 말고 <b>다운로드 폴더에서 바로
+            삭제(가능하면 휴지통을 거치지 않는 Shift+Delete로 완전 삭제)</b>해 주세요. 특히
+            여러 사람이 함께 쓰는 컴퓨터라면 다운로드 폴더에 방치된 파일이 개인정보 유출
+            통로가 될 수 있습니다.
+          </div>
+          <div className="confirm-actions">
+            <button className="btn btn-primary" onClick={onClose}>확인</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5251,6 +5406,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
   const [pendingImport, setPendingImport] = useState(null);
   const importInputRef = useRef(null);
   const [backupLog, setBackupLog] = useState(null);
+  const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
 
   useEffect(() => {
     loadBackupLog(workspaceCode).then(list => setBackupLog(list.slice().reverse()));
@@ -5272,6 +5428,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
     const entry = { ts: Date.now(), by: myDisplayName };
     appendBackupLog(workspaceCode, entry);
     setBackupLog(prev => [entry, ...(prev || [])]);
+    setShowDeleteReminder(true);
   }
 
   function handleImportFile(e) {
@@ -5367,6 +5524,8 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 
       <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} fillState={neisFillState} setFillState={setNeisFillState} />
 
+      {showDeleteReminder && <DownloadDeleteReminderModal onClose={() => setShowDeleteReminder(false)} />}
+
       {pendingImport && isFounder && (
         <ConfirmModal
           title="백업 파일 불러오기"
@@ -5386,6 +5545,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [backedUp, setBackedUp] = useState(false);
+  const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
 
   const recordCount = Object.keys(records || {}).length;
   const studentCount = students.length;
@@ -5404,10 +5564,12 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
     a.remove();
     URL.revokeObjectURL(url);
     setBackedUp(true);
+    setShowDeleteReminder(true);
   }
 
   return (
     <div>
+      {showDeleteReminder && <DownloadDeleteReminderModal onClose={() => setShowDeleteReminder(false)} />}
       <div className="panel closeout-hero">
         <Trash2 size={36} color="#E85D5D" />
         <h2 className="closeout-title">마감</h2>
@@ -6568,6 +6730,9 @@ function PapsStyles({ children }) {
         }
         .drill-student-name { font-size: 13px; font-weight: 600; }
         .drill-student-input { text-align: center; font-family: 'Oswald', sans-serif; padding: 6px 8px; }
+        .drill-panel-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+        .drill-panel-head h3 { margin: 0; }
+        .mask-toggle-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 
         /* 종목 선택 칩 + 생략 체크 */
         .event-chip { display: flex; align-items: center; gap: 8px; }
@@ -6700,6 +6865,8 @@ function PapsStyles({ children }) {
           position: fixed; inset: 0; background: rgba(5,8,20,0.72); z-index: 100;
           display: flex; align-items: center; justify-content: center; padding: 20px;
         }
+        .idle-lock-backdrop { background: rgba(5,8,20,0.97); z-index: 200; }
+        .mask-toggle-btn.active { background: var(--track-red); border-color: var(--track-red); color: #fff; }
         .modal-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 20px; }
         .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
         .modal-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: 'Oswald', sans-serif; font-size: 17px; }
