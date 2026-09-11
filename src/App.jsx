@@ -665,6 +665,13 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [criteria, setCriteria] = useState(null);
   const [settings, setSettings] = useState({ schoolName: "", currentYear: thisYear() });
   const [records, setRecords] = useState({});
+  // 나이스 반영(NeisTemplateFiller)에서 첨부한 파일·인식결과·반영결과. 데이터백업 탭을
+  // 벗어났다가 다시 돌아오면 그 탭 내부 컴포넌트가 다시 마운트되면서 로컬 state가 초기화돼
+  // 방금 첨부·반영한 내용이 사라져 버리는 문제가 있었다. 세션 내내 유지되는 여기(최상위
+  // 컴포넌트)에 상태를 두어, 탭을 오가도 그대로 남아있게 한다.
+  const [neisFillState, setNeisFillState] = useState({
+    fileName: "", headerRow: null, dataRows: null, mapping: [], resultRows: null, sheetName: "Sheet1",
+  });
   const [view, setView] = useState("board");
   const [presentation, setPresentation] = useState(false);
   const [lastSync, setLastSync] = useState(null);
@@ -1178,7 +1185,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setTimeout(() => setToast(t => (t && t.id) ? null : t), 4000);
       }
       const entry = { value, schoolGradeAtMeasure, updatedAt: Date.now() };
-      if (parts) entry.parts = parts;
       // 큐 덕분에 이 시점에는 같은 기기의 이전 저장이 이미 완전히 끝나 있으므로, 저장소의
       // 최신 값을 그대로 기준으로 삼아도 안전하다(다른 기기의 거의 동시 저장까지 대비해
       // 화면에 캐시된 값도 함께 참고한다).
@@ -1186,6 +1192,30 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       const base = mergeRecords(records, latest);
       const key = recKey(studentId, eventId, year);
       const prevValue = base[key]?.value;
+      if (parts) {
+        // 제자리멀리뛰기·앉아윗몸앞으로굽히기(1차/2차), 악력(1차/2차×좌우), BMI(신장/체중)처럼
+        // 한 종목 기록이 여러 하위 값으로 이뤄진 경우, 이 화면(컴포넌트)이 열려 있는 동안
+        // 다른 기기에서 그중 다른 하위 값만 먼저 저장했을 수 있다. 이때 이 화면에 아직 반영 안
+        // 된(값이 비어있는) 하위 항목까지 통째로 덮어써버리면, 방금 다른 기기가 저장한 값이
+        // 사라져버린다("1차는 있는데 2차가 어느 순간 없어짐" 같은 증상의 원인). 그래서 방금
+        // 서버에서 새로 받아온 이전 값을 바탕으로, 이번에 실제로 입력된(비어있지 않은) 하위
+        // 값만 덮어씌운다.
+        const prevParts = base[key]?.parts || {};
+        const mergedParts = { ...prevParts };
+        Object.keys(parts).forEach(k => {
+          if (parts[k] !== null && parts[k] !== undefined && !Number.isNaN(parts[k])) mergedParts[k] = parts[k];
+        });
+        entry.parts = mergedParts;
+        // 제자리멀리뛰기·앉아윗몸앞으로굽히기·악력처럼 "여러 번 측정 중 최고기록"을 대표값으로
+        // 쓰는 종목은, 방금 병합된 하위 값들을 기준으로 대표값도 다시 계산한다. 그렇지 않으면
+        // 이 기기가 자신이 입력한 값만으로 최고기록을 계산해 저장하기 때문에, 다른 기기가 먼저
+        // 저장해둔 더 좋은 하위 기록이 있어도(위에서 parts는 병합됐지만) 대표값(등급·순위·제출
+        // 양식 반영에 쓰이는 값)은 그보다 낮게 저장되어버리는 경우가 생길 수 있다.
+        if (eventId === "longjump" || eventId === "sitreach" || eventId === "gripstrength") {
+          const mergedNums = Object.values(mergedParts).filter(v => typeof v === "number" && !Number.isNaN(v));
+          if (mergedNums.length > 0) entry.value = Math.max(...mergedNums);
+        }
+      }
       const next = { ...base, [key]: entry };
       setRecords(next);
       setLastSync(Date.now());
@@ -1622,6 +1652,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               workspaceCode={workspaceCode}
               myDisplayName={myDisplayName}
               isFounder={isFounder}
+              neisFillState={neisFillState}
+              setNeisFillState={setNeisFillState}
             />
           )}
           {view === "closeout" && role === "admin" && isFounder && (
@@ -5062,15 +5094,18 @@ function neisFieldValue(student, field, records, activeYear) {
   return v(records[recKey(student.id, field, activeYear)]?.value);
 }
 
-function NeisTemplateFiller({ students, records, activeYear, showToast }) {
+function NeisTemplateFiller({ students, records, activeYear, showToast, fillState, setFillState }) {
   const fileInputRef = useRef(null);
-  const [fileName, setFileName] = useState("");
-  const [dragOver, setDragOver] = useState(false);
-  const [headerRow, setHeaderRow] = useState(null); // 원본 헤더 텍스트 배열
-  const [dataRows, setDataRows] = useState(null);   // 템플릿에 이미 있던 데이터 행(있다면)
-  const [mapping, setMapping] = useState([]);       // 열 인덱스별 매칭된 field
-  const [resultRows, setResultRows] = useState(null);
-  const [sheetName, setSheetName] = useState("Sheet1");
+  const [dragOver, setDragOver] = useState(false); // 드래그 중인지 여부는 탭을 오가며 유지할 필요가 없는 순간 UI 상태라 그대로 로컬로 둔다.
+  // 첨부파일명·인식된 헤더·반영결과 등은 상위(PapsApp)에서 내려주는 fillState에 둬서,
+  // 데이터백업 탭을 벗어났다가 다시 돌아와도 사라지지 않는다.
+  const { fileName, headerRow, dataRows, mapping, resultRows, sheetName } = fillState;
+  const setFileName = v => setFillState(prev => ({ ...prev, fileName: v }));
+  const setHeaderRow = v => setFillState(prev => ({ ...prev, headerRow: v }));
+  const setDataRows = v => setFillState(prev => ({ ...prev, dataRows: v }));
+  const setMapping = v => setFillState(prev => ({ ...prev, mapping: v }));
+  const setResultRows = v => setFillState(prev => ({ ...prev, resultRows: v }));
+  const setSheetName = v => setFillState(prev => ({ ...prev, sheetName: v }));
 
   function processFile(file) {
     if (!file) return;
@@ -5212,7 +5247,7 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
   );
 }
 
-function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName, isFounder }) {
+function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName, isFounder, neisFillState, setNeisFillState }) {
   const [pendingImport, setPendingImport] = useState(null);
   const importInputRef = useRef(null);
   const [backupLog, setBackupLog] = useState(null);
@@ -5330,7 +5365,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
         )}
       </div>
 
-      <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} />
+      <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} fillState={neisFillState} setFillState={setNeisFillState} />
 
       {pendingImport && isFounder && (
         <ConfirmModal
