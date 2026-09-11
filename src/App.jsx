@@ -5021,9 +5021,11 @@ const NEIS_FIELD_RULES = [
   { field: "longjump", label: "제자리멀리뛰기", test: h => /제자리|멀리뛰기/.test(h) },
   { field: "fifty_m", label: "50m달리기", test: h => /50\s*m|50\s*미터/i.test(h) },
   { field: "bodyfat", label: "체지방률", test: h => /체지방/.test(h) },
-  // 신장·체중은 BMI를 구하기 위한 중간값일 뿐이라, "신장"·"체중"(혹은 "BMI"/"체질량지수")
-  // 열은 모두 신장·체중 실측값이 아니라 그 둘로 계산된 BMI 수치 하나로 채운다.
-  { field: "bmi_value", label: "BMI", test: h => /BMI/i.test(h) || /체질량\s*지수/.test(h) || /신장|키\(/.test(h) || /^키$/.test(h) || /체중|몸무게/.test(h) },
+  // "BMI"/"체질량지수" 열엔 계산된 BMI 수치를, "신장"/"체중" 열엔 기록입력 화면에서
+  // 입력한 신장·체중 실측값을 각각 그대로 채운다(둘은 서로 다른 열).
+  { field: "bmi_value", label: "BMI", test: h => /BMI/i.test(h) || /체질량\s*지수/.test(h) },
+  { field: "bmi_height", label: "신장", test: h => /신장|키\(/.test(h) || /^키$/.test(h) },
+  { field: "bmi_weight", label: "체중", test: h => /체중|몸무게/.test(h) },
 ];
 function guessNeisField(header) {
   const h = String(header || "");
@@ -5047,6 +5049,8 @@ function neisFieldValue(student, field, records, activeYear) {
   if (field === "student_number") return v(student.number);
   if (field === "student_name") return student.name;
   if (field === "bmi_value") return v(records[recKey(student.id, "bmi", activeYear)]?.value);
+  if (field === "bmi_height") return v(records[recKey(student.id, "bmi", activeYear)]?.parts?.height);
+  if (field === "bmi_weight") return v(records[recKey(student.id, "bmi", activeYear)]?.parts?.weight);
   if (field.startsWith("sitreach_")) return v(records[recKey(student.id, "sitreach", activeYear)]?.parts?.["trial" + field.slice(-1)]);
   if (field.startsWith("longjump_")) return v(records[recKey(student.id, "longjump", activeYear)]?.parts?.["trial" + field.slice(-1)]);
   if (field.startsWith("gripstrength_")) {
@@ -5160,9 +5164,9 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
       <h3>학교 시스템(나이스) 양식에 직접 반영하기</h3>
       <div className="text-dim small-note">
         나이스에서 받은 진짜 양식 파일을 여기에 첨부한 뒤 "반영하기"를 누르면, 이 프로그램의
-        기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중"·"BMI" 열에는 모두 신장·체중으로
-        계산된 BMI 수치가 채워집니다(신장·체중 실측값 자체는 채우지 않습니다). <b>실제로
-        제출하시기 전에 아래 미리보기에서 값이 정확히 채워졌는지 꼭 확인해 주세요.</b>
+        기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중" 열은 기록입력 화면에서
+        입력한 신장·체중 실측값이, "BMI" 열은 그 값으로 계산된 BMI 수치가 채워집니다.
+        <b> 실제로 제출하시기 전에 아래 미리보기에서 값이 정확히 채워졌는지 꼭 확인해 주세요.</b>
       </div>
 
       <input id="neis-template-input" ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="visually-hidden-input" onChange={handleFile} />
