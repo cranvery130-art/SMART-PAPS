@@ -3129,6 +3129,16 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
   const ev = EVENT_MAP[eventId];
   const skippedEvents = settings.skippedEvents || [];
   const schoolGrades = gradesForLevel(settings.schoolLevel || "middle");
+  // BMI 입력 화면에서 학생마다 하나씩 "직접 입력" 체크박스를 누르지 않아도, 버튼 하나로
+  // 현재 보이는 반 전체를 한 번에 전체선택/전체해제할 수 있게 하기 위한 신호(epoch가 바뀔
+  // 때마다 BmiRow들이 자신의 직접입력 모드를 forceValue로 맞춘다). 그 이후 개별 학생이
+  // 다시 체크박스를 직접 누르면 그 학생만 원래대로 개별 조정 가능하다.
+  const [bmiDirectEpoch, setBmiDirectEpoch] = useState(0);
+  const [bmiDirectForceValue, setBmiDirectForceValue] = useState(true);
+  function applyBmiDirectAll(value) {
+    setBmiDirectForceValue(value);
+    setBmiDirectEpoch(e => e + 1);
+  }
 
   const gradeStats = useMemo(() => {
     const stats = {};
@@ -3209,11 +3219,19 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
           ))}
         </div>
       )}
+      {grade !== null && classNum !== null && eventId === "bmi" && classStudents.length > 0 && (
+        <div className="bmi-bulk-toggle-row">
+          <span className="text-dim small-note">직접 입력 일괄 설정:</span>
+          <button type="button" className="btn btn-secondary small" onClick={() => applyBmiDirectAll(true)}>전체 선택(직접 입력)</button>
+          <button type="button" className="btn btn-secondary small" onClick={() => applyBmiDirectAll(false)}>전체 해제(신장·체중 입력)</button>
+        </div>
+      )}
       {grade !== null && classNum !== null && (
         <div className="drill-students drill-scroll">
           {classStudents.length === 0 && <div className="text-dim">학생이 없습니다.</div>}
           {classStudents.map(s => (
-            <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"} />
+            <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"}
+              forceDirectMode={eventId === "bmi" ? { epoch: bmiDirectEpoch, value: bmiDirectForceValue } : undefined} />
           ))}
         </div>
       )}
@@ -3569,7 +3587,7 @@ function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
 }
 
 // BMI: 신장·체중만 입력하면 자동 계산. 등급을 매기지 않고 또래 평균 대비 위치만 안내한다.
-function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel }) {
+function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel, forceDirectMode }) {
   const eventId = "bmi";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3589,6 +3607,13 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
       setDirectValue(String(existing));
     }
   }, [existing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 상위(RecordManagementView)에서 "전체 선택/전체 해제" 버튼을 눌러 epoch가 바뀌면,
+  // 이 학생 행도 그 값으로 직접입력 모드를 일괄 전환한다(그 뒤엔 다시 개별로 바꿀 수 있음).
+  useEffect(() => {
+    if (!forceDirectMode || !forceDirectMode.epoch) return;
+    setDirectMode(forceDirectMode.value);
+  }, [forceDirectMode?.epoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function commit(nh, nw) {
     const h = nh === "" ? null : Number(nh);
@@ -4826,6 +4851,14 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
       <div className="panel">
         <h3>엑셀 파일로 추가</h3>
         <div className="text-dim small-note">여러 학생을 한 번에 등록할 때(예: 새 학년도 전체 명단 등록) 활용하세요.</div>
+        <div className="info-banner">
+          <AlertTriangle size={16} />
+          <span>
+            <b>나이스 "학생명렬 내려받기"로 받은 엑셀 파일을 올려주세요.</b> 그래야 성별이 정확히 반영됩니다.
+            성별 열이 없거나 인식되지 않는 파일을 올리면 학생 전원이 자동으로 "여"로 등록되니,
+            올린 뒤에는 아래 명단에서 성별이 맞게 들어갔는지 꼭 확인해 주세요.
+          </span>
+        </div>
         <label
           htmlFor="roster-excel-file-input"
           className={"dropzone" + (dragOver ? " drag-over" : "")}
@@ -4973,7 +5006,7 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
 // 나이스 등 학교 시스템 엑셀 양식에 기록을 채워 넣기 위한 열 인식 사전.
 // 더 구체적인 항목을 먼저 검사해야 헷갈리지 않는다(예: "왕복오래달리기"를 "오래달리기"보다 먼저 검사).
 const NEIS_FIELD_RULES = [
-  { field: "student_grade", label: "학년", test: h => /학년/.test(h) },
+  { field: "student_grade", label: "학년", test: h => /학년/.test(h) && !/학년도/.test(h) },
   { field: "student_class", label: "반", test: h => /반명|반코드|학급/.test(h) },
   { field: "student_number", label: "번호", test: h => /번호/.test(h) },
   { field: "student_name", label: "성명/이름", test: h => /성명|이름/.test(h) },
@@ -4991,13 +5024,30 @@ const NEIS_FIELD_RULES = [
   { field: "bmi_height", label: "신장", test: h => /신장|키\(/.test(h) || /^키$/.test(h) },
   { field: "bmi_weight", label: "체중", test: h => /체중|몸무게/.test(h) },
 ];
+// 앉아윗몸앞으로굽히기·제자리멀리뛰기(1차/2차)와 악력(1차/2차 × 좌/우)은 종목 하나에
+// 실제로는 여러 열(시도 횟수·좌우)이 대응될 수 있다. guessNeisField가 자동으로 인식하는
+// "종목_시도" 형태의 세부 필드를 이 목록에서도 그대로 선택할 수 있어야, 자동 인식된 열이
+// 드롭다운에 실제로 표시되고(안 그러면 인식은 됐는데 화면엔 "이 열은 무시"로 잘못 보임),
+// 자동 인식이 빗나갔을 때 사람이 직접 세부 항목을 골라 바로잡을 수도 있다.
+const MULTI_PART_EVENT_IDS = ["sitreach", "longjump", "gripstrength"];
 const NEIS_FIELD_OPTIONS = [
   { field: "", label: "(이 열은 무시)" },
   { field: "student_grade", label: "학년" },
   { field: "student_class", label: "반" },
   { field: "student_number", label: "번호" },
   { field: "student_name", label: "성명/이름" },
-  ...ALL_EVENTS.filter(e => e.id !== "bmi").map(e => ({ field: e.id, label: e.name })),
+  ...ALL_EVENTS.filter(e => e.id !== "bmi").map(e => ({
+    field: e.id,
+    label: MULTI_PART_EVENT_IDS.includes(e.id) ? e.name + " (최고기록 · 열이 하나뿐일 때)" : e.name,
+  })),
+  { field: "sitreach_1", label: "앉아윗몸앞으로굽히기 1차" },
+  { field: "sitreach_2", label: "앉아윗몸앞으로굽히기 2차" },
+  { field: "longjump_1", label: "제자리멀리뛰기 1차" },
+  { field: "longjump_2", label: "제자리멀리뛰기 2차" },
+  { field: "gripstrength_1_left", label: "악력 1차 왼쪽" },
+  { field: "gripstrength_1_right", label: "악력 1차 오른쪽" },
+  { field: "gripstrength_2_left", label: "악력 2차 왼쪽" },
+  { field: "gripstrength_2_right", label: "악력 2차 오른쪽" },
   { field: "bmi_height", label: "신장" },
   { field: "bmi_weight", label: "체중" },
 ];
@@ -6101,6 +6151,7 @@ function PapsStyles({ children }) {
         .icon-btn { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 6px; }
         .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
         .icon-btn.danger:hover { color: var(--track-red); }
+        .bmi-bulk-toggle-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
 
         .paps-body { padding: 20px; }
         .presentation .paps-body { padding: 24px 32px; }
