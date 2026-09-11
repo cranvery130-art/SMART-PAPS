@@ -1112,17 +1112,23 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   /* ---------- 저장 헬퍼 ---------- */
   // 조회 전용(viewer) 권한은 어떤 경우에도 데이터를 쓰지 않도록 이중으로 막는다
   // (화면 자체에서도 입력/관리 탭을 보여주지 않지만, 안전장치를 하나 더 둔다).
-  const persistConfig = useCallback(async (nextStudents, nextCriteria, nextSettings) => {
-    if (role !== "admin") return;
+  const persistConfig = useCallback((nextStudents, nextCriteria, nextSettings) => {
+    if (role !== "admin") return Promise.resolve();
     // 저장 직전에 서버의 최신 값을 한 번 더 받아와서, 지금 바꾸는 항목이 아닌 나머지는
-    // 내 화면에 캐시된(어쩌면 오래된) 값이 아니라 최신 값을 그대로 유지한다.
-    const latest = await loadConfig(workspaceCode);
-    const cfg = {
-      students: nextStudents !== undefined ? nextStudents : (latest?.students ?? students),
-      criteria: nextCriteria !== undefined ? nextCriteria : (latest?.criteria ?? criteria),
-      settings: nextSettings !== undefined ? nextSettings : (latest?.settings ?? settings),
-    };
-    await saveConfigRemote(workspaceCode, cfg);
+    // 내 화면에 캐시된(어쩌면 오래된) 값이 아니라 최신 값을 그대로 유지한다. 엑셀 파일을
+    // 연달아 여러 번 드래그하는 등 이 저장이 겹쳐 호출될 수 있으므로, 기록 저장과 같은
+    // 큐를 통해 반드시 순서대로(하나씩) 진행되도록 한다 — 그렇지 않으면 나중에 시작했지만
+    // 먼저 끝난 저장이 최신 저장을 덮어써서, 방금 추가한 학생이 사라지는 문제가 생긴다.
+    return enqueueSave(async () => {
+      const latest = await loadConfig(workspaceCode);
+      const cfg = {
+        ...(latest || {}),
+        students: nextStudents !== undefined ? nextStudents : (latest?.students ?? students),
+        criteria: nextCriteria !== undefined ? nextCriteria : (latest?.criteria ?? criteria),
+        settings: nextSettings !== undefined ? nextSettings : (latest?.settings ?? settings),
+      };
+      await saveConfigRemote(workspaceCode, cfg);
+    });
   }, [students, criteria, settings, workspaceCode, role]);
 
   const persistRecords = useCallback(async (nextRecords) => {
@@ -3565,11 +3571,19 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
   const parts = studentParts(student.id, eventId, activeYear);
   const [height, setHeight] = useState(parts ? String(parts.height ?? "") : "");
   const [weight, setWeight] = useState(parts ? String(parts.weight ?? "") : "");
+  // 신장·체중 대신 BMI 수치 자체를 이미 알고 있어 바로 입력하고 싶은 경우를 위한 직접입력
+  // 모드. 이 모드로 저장하면 신장·체중(parts) 없이 BMI 값만 저장된다.
+  const [directMode, setDirectMode] = useState(!parts && existing !== null);
+  const [directValue, setDirectValue] = useState(!parts && existing !== null ? String(existing) : "");
 
   useEffect(() => {
     const p = parts;
     setHeight(p ? String(p.height ?? "") : "");
     setWeight(p ? String(p.weight ?? "") : "");
+    if (!p && existing !== null) {
+      setDirectMode(true);
+      setDirectValue(String(existing));
+    }
   }, [existing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function commit(nh, nw) {
@@ -3583,15 +3597,33 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
     await onSave(student.id, eventId, bmi, activeYear, gradeAtMeasure, { height: h, weight: w });
   }
 
+  async function commitDirect(nv) {
+    const v = nv === "" ? null : Number(nv);
+    if (v === null || Number.isNaN(v)) return;
+    if (v === existing && !parts) return;
+    const gradeAtMeasure = inferSchoolGradeAtYear(student, activeYear);
+    await onSave(student.id, eventId, v, activeYear, gradeAtMeasure, null);
+  }
+
   const refText = describeBmiCategory(existing, student, schoolLevel);
 
   return (
     <div className="drill-student-row bmi-row">
       <span className="drill-student-name">{student.number}. {student.name}</span>
-      <input className="input drill-student-input" type="number" step="0.1" value={height} placeholder="신장(cm)"
-        onChange={e => setHeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
-      <input className="input drill-student-input" type="number" step="0.1" value={weight} placeholder="체중(kg)"
-        onChange={e => setWeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+      {directMode ? (
+        <input className="input drill-student-input" type="number" step="0.1" value={directValue} placeholder="BMI 수치"
+          onChange={e => setDirectValue(e.target.value)} onBlur={() => commitDirect(directValue)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+      ) : (
+        <>
+          <input className="input drill-student-input" type="number" step="0.1" value={height} placeholder="신장(cm)"
+            onChange={e => setHeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+          <input className="input drill-student-input" type="number" step="0.1" value={weight} placeholder="체중(kg)"
+            onChange={e => setWeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+        </>
+      )}
+      <label className="bmi-direct-toggle">
+        <input type="checkbox" checked={directMode} onChange={e => setDirectMode(e.target.checked)} /> 직접 입력
+      </label>
       <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? "BMI " + existing : "-"}</span>
       {existing !== null && <span className="bmi-ref-tag">{refText}</span>}
     </div>
@@ -4648,6 +4680,15 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
   const [dragOver, setDragOver] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [lastBulkAddedIds, setLastBulkAddedIds] = useState(null);
+  // 엑셀 파일을 연달아 여러 번 드래그하면, 앞선 파일을 아직 읽는 중(비동기)일 때 뒤이은
+  // 드래그가 시작될 수 있다. 이때 각각의 처리 함수가 자신이 호출된 시점의(어쩌면 오래된)
+  // students prop만 보고 "기존 목록 + 이번에 추가된 명단"을 계산하면, 나중에 끝난 쪽이
+  // 앞서 추가된 학생들을 빼먹은 채로 덮어써 버릴 수 있다. 이를 막기 위해 매 렌더마다 최신
+  // students 값을 ref에 동기화해두고, 일괄 추가 시에는 이 ref를 기준으로 이어붙인 뒤 ref도
+  // 즉시 갱신해서 다음 호출이 항상 "지금까지 추가된 모든 학생"을 보게 한다.
+  const studentsRef = useRef(students);
+  studentsRef.current = students;
 
   function toggleSelect(id) {
     setSelected(prev => {
@@ -4703,6 +4744,16 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
     setStudents(students.filter(s => s.id !== id));
   }
 
+  function undoLastBulkAdd() {
+    if (!lastBulkAddedIds) return;
+    const idSet = new Set(lastBulkAddedIds);
+    const next = studentsRef.current.filter(s => !idSet.has(s.id));
+    setStudents(next);
+    studentsRef.current = next;
+    setLastBulkAddedIds(null);
+    showToast("방금 추가한 명단을 되돌렸습니다.", "ok");
+  }
+
   function bulkAdd() {
     const lines = bulkText.split("\n").map(l => l.trim()).filter(Boolean);
     const added = [];
@@ -4714,7 +4765,10 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
       added.push({ id: uid("stu"), grade: Number(g), classNum: Number(c), number: Number(n), name, gender: genderNorm });
     });
     if (added.length > 0) {
-      setStudents([...students, ...added]);
+      const next = [...studentsRef.current, ...added];
+      setStudents(next);
+      studentsRef.current = next;
+      setLastBulkAddedIds(added.map(s => s.id));
       setBulkText("");
       showToast(added.length + "명을 일괄 추가했습니다.", "ok");
     } else {
@@ -4749,7 +4803,13 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
     const problemFiles = results.filter(r => !r.ok || r.added.length === 0).map(r => r.name);
 
     if (allAdded.length > 0) {
-      setStudents([...students, ...allAdded]);
+      // 항상 studentsRef(최신 값)를 기준으로 이어붙인다 — 파일을 읽는 동안(await) 다른
+      // 드래그가 먼저 끝나 학생을 추가했을 수도 있으므로, 이 함수가 시작될 때 캡처했던
+      // students 클로저가 아니라 지금 가장 최신인 목록 위에 이어서 추가한다.
+      const next = [...studentsRef.current, ...allAdded];
+      setStudents(next);
+      studentsRef.current = next;
+      setLastBulkAddedIds(allAdded.map(s => s.id));
     }
     if (allAdded.length > 0 && problemFiles.length === 0) {
       showToast(
@@ -4812,6 +4872,12 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
           className="visually-hidden-input"
           onChange={handleExcelFile}
         />
+        {lastBulkAddedIds && (
+          <div className="bulk-undo-row">
+            <span className="text-dim small-note">방금 {lastBulkAddedIds.length}명을 추가했습니다.</span>
+            <button className="btn btn-ghost small" onClick={undoLastBulkAdd}><RotateCcw size={13} /> 되돌리기</button>
+          </div>
+        )}
 
         <div className="divider" />
 
@@ -5302,6 +5368,7 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
 
   const recordCount = Object.keys(records || {}).length;
   const studentCount = students.length;
+  const isEmpty = studentCount === 0 && recordCount === 0;
 
   function downloadBackupNow() {
     const payload = { exportedAt: Date.now(), students, criteria, settings, records };
@@ -5338,26 +5405,34 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
         </ul>
 
         <div className="closeout-backup-step">
-          <div className="backup-step-title">① 백업 파일부터 받으세요 (필수)</div>
-          <div className="text-dim small-note">
-            아래 버튼으로 지금 상태를 백업해두지 않으면 "마감하기" 버튼이 눌리지 않습니다.
-            만약을 대비한 최소한의 안전장치입니다.
-          </div>
-          <button className="btn btn-secondary" onClick={downloadBackupNow}>
-            <Copy size={14} /> {backedUp ? "백업 파일 다시 받기" : "지금 백업 파일 받기"}
-          </button>
-          {backedUp && <div className="closeout-backup-done"><CheckCircle2 size={14} /> 백업을 받았습니다. 이제 마감할 수 있습니다.</div>}
+          {isEmpty ? (
+            <div className="text-dim small-note">
+              현재 학생 명단과 기록이 없어서, 백업 없이 바로 마감할 수 있습니다.
+            </div>
+          ) : (
+            <>
+              <div className="backup-step-title">① 백업 파일부터 받으세요 (필수)</div>
+              <div className="text-dim small-note">
+                아래 버튼으로 지금 상태를 백업해두지 않으면 "마감하기" 버튼이 눌리지 않습니다.
+                만약을 대비한 최소한의 안전장치입니다.
+              </div>
+              <button className="btn btn-secondary" onClick={downloadBackupNow}>
+                <Copy size={14} /> {backedUp ? "백업 파일 다시 받기" : "지금 백업 파일 받기"}
+              </button>
+              {backedUp && <div className="closeout-backup-done"><CheckCircle2 size={14} /> 백업을 받았습니다. 이제 마감할 수 있습니다.</div>}
+            </>
+          )}
         </div>
 
         <div className="closeout-summary">
           현재 <b>학생 {studentCount}명</b>, <b>기록 {recordCount}건</b>이 저장되어 있습니다.
           마감하면 <b>학생 명단과 기록이 모두 삭제</b>됩니다.
         </div>
-        <div className="closeout-step-title">② 마감하기</div>
-        <button className="btn btn-primary closeout-btn" onClick={() => setConfirmOpen(true)} disabled={!backedUp}>
+        <div className="closeout-step-title">{isEmpty ? "마감하기" : "② 마감하기"}</div>
+        <button className="btn btn-primary closeout-btn" onClick={() => setConfirmOpen(true)} disabled={!isEmpty && !backedUp}>
           <Trash2 size={16} /> 마감하기
         </button>
-        {!backedUp && <div className="text-dim small-note">먼저 위에서 백업 파일을 받아야 눌러집니다.</div>}
+        {!isEmpty && !backedUp && <div className="text-dim small-note">먼저 위에서 백업 파일을 받아야 눌러집니다.</div>}
 
         <div className="closeout-footer">
           <p className="closeout-footer-text">
@@ -6269,6 +6344,7 @@ function PapsStyles({ children }) {
         .danger-btn:hover:not(:disabled) { color: var(--track-red); border-color: var(--track-red); }
         .chip.small { padding: 4px 9px; font-size: 11px; }
 
+        .bulk-undo-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
         .dropzone {
           border: 2px dashed var(--line); border-radius: 12px; padding: 22px 14px; text-align: center;
           cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -6445,6 +6521,7 @@ function PapsStyles({ children }) {
           border: 1px solid rgba(255,201,60,0.3);
         }
         .bmi-ref-tag { font-size: 11px; color: var(--text-dim); white-space: nowrap; text-align: right; }
+        .bmi-direct-toggle { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
         @media (max-width: 760px) {
           .drill-student-row.two-trial, .drill-student-row.grip-row, .drill-student-row.bmi-row, .drill-student-row.bodyfat-row {
             grid-template-columns: 1fr 1fr; row-gap: 6px;
