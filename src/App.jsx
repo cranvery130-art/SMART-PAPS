@@ -338,7 +338,7 @@ function buildDefaultConfig(schoolLevel, viewerPassword, founderPassword) {
   return {
     students: [],
     criteria: buildDefaultCriteria(lvl),
-    settings: { schoolName: "", schoolLevel: lvl, passGradeThreshold: 4, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
+    settings: { schoolName: "", schoolLevel: lvl, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
     createdAt: Date.now(),
   };
 }
@@ -663,7 +663,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [loadError, setLoadError] = useState(false);
   const [students, setStudents] = useState([]);
   const [criteria, setCriteria] = useState(null);
-  const [settings, setSettings] = useState({ schoolName: "", passGradeThreshold: 4, currentYear: thisYear() });
+  const [settings, setSettings] = useState({ schoolName: "", currentYear: thisYear() });
   const [records, setRecords] = useState({});
   const [view, setView] = useState("board");
   const [presentation, setPresentation] = useState(false);
@@ -1001,7 +1001,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setLoading(true);
         return;
       }
-      if (!finalCfg.settings) finalCfg.settings = { schoolName: "", passGradeThreshold: 4 };
+      if (!finalCfg.settings) finalCfg.settings = { schoolName: "" };
       if (!finalCfg.settings.currentYear) finalCfg.settings.currentYear = thisYear();
       const year = finalCfg.settings.currentYear;
 
@@ -1054,7 +1054,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         if (cfg) {
           setStudents(cfg.students || []);
           setCriteria(cfg.criteria || buildDefaultCriteria(cfg.settings?.schoolLevel));
-          setSettings(cfg.settings || { schoolName: "", passGradeThreshold: 4, currentYear: thisYear() });
+          setSettings(cfg.settings || { schoolName: "", currentYear: thisYear() });
         }
       } else {
         // 이 화면들에 머무는 동안에도, 다른 선생님이 그 사이에 새로 등록한 학생만큼은 놓치지
@@ -1244,7 +1244,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const handleImportBackup = useCallback(async (payload) => {
     if (role !== "admin" || !isFounder) return;
     const nextStudents = payload.students || [];
-    const nextSettings = payload.settings || { schoolName: "", passGradeThreshold: 4, currentYear: thisYear() };
+    const nextSettings = payload.settings || { schoolName: "", currentYear: thisYear() };
     const nextCriteria = payload.criteria || buildDefaultCriteria(nextSettings.schoolLevel);
     const nextRecords = payload.records || {};
     setStudents(nextStudents);
@@ -1316,18 +1316,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     const bands = getBands(eventId, student.gender, gradeAtMeasure);
     return computeGradeFromBands(r.value, bands);
   }, [records, getBands]);
-
-  const studentOverall = useCallback((student, year) => {
-    const skipped = computeEffectiveSkip(settings.skippedEvents);
-    // BMI는 학생 성장 확인용일 뿐 등급이 없으므로 항상 종합등급에서 제외한다.
-    const activeEvents = EVENTS.filter(ev => !skipped.has(ev.id));
-    const grades = activeEvents.map(ev => studentGrade(student, ev.id, year)).filter(g => g !== null);
-    if (grades.length === 0) return { grade: null, pass: null, count: 0 };
-    const avg = grades.reduce((a, b) => a + b, 0) / grades.length;
-    const rounded = Math.round(avg);
-    const pass = rounded <= (settings.passGradeThreshold || 4);
-    return { grade: rounded, avg, pass, count: grades.length };
-  }, [studentGrade, settings]);
 
   /* ---------- 창 닫기/새로고침 전 경고 ---------- */
   // 무료 요금제 등에서 입력 중이던 내용을 깜빡하고 창을 닫아 잃어버리는 걸 막기 위해,
@@ -1568,7 +1556,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               activeYear={activeYear}
               studentValue={studentValue}
               studentGrade={studentGrade}
-              studentOverall={studentOverall}
               skippedEvents={settings.skippedEvents || []}
               schoolGrades={schoolGrades}
               presentation={presentation}
@@ -1596,8 +1583,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               activeYear={activeYear}
               studentValue={studentValue}
               studentGrade={studentGrade}
-              studentOverall={studentOverall}
-              passGradeThreshold={settings.passGradeThreshold}
               settings={settings}
               setSettings={(next) => { setSettings(next); persistConfig(undefined, undefined, next); }}
               isAdmin={role === "admin"}
@@ -1969,7 +1954,7 @@ function UserManualModal({ onClose }) {
     { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
     { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 끌어다 놓으면 한 번에 등록됩니다." },
     { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다." },
-    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 등급과 합격 여부를 바로 확인할 수 있습니다." },
+    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
     { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
     { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다." },
     { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다." },
@@ -2751,7 +2736,7 @@ function ShareGuideModal({ workspaceCode, onClose }) {
   );
 }
 
-function ScoreBoard({ students, records, activeYear, studentValue, studentGrade, studentOverall, skippedEvents, schoolGrades, presentation, setPresentation, onExitPresentation, lastSync }) {
+function ScoreBoard({ students, records, activeYear, studentValue, studentGrade, skippedEvents, schoolGrades, presentation, setPresentation, onExitPresentation, lastSync }) {
   const [boardMode, setBoardMode] = useState("single"); // 'single' | 'all'
   const [eventId, setEventId] = useState(EVENTS[0].id);
   const [unit, setUnit] = useState("student"); // 'student' | 'class'
@@ -2824,7 +2809,7 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
     if (isOverall) {
       // 종합 랭킹은 체력 종목(EVENTS)만 반영하고 BMI는 제외한다.
       // BMI는 순위 경쟁으로 노출되면 학생, 특히 여학생에게 민감할 수 있어
-      // 개인별 등급표(합불 확인) 용도로만 별도로 보여준다.
+      // 개인별 등급표(종목별 등급 참고) 용도로만 별도로 보여준다.
       const list = filtered
         .map(s => {
           const avg = studentAvgGrade(s);
@@ -3242,7 +3227,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
     <div className="record-mgmt">
       <div className="panel">
         <h3>종목 선택</h3>
-        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표의 합불 판정용 평균 계산에서 빠짐). BMI·체지방률은 항상 자동으로 빠집니다.</div>
+        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표에서도 숨김 처리됨). BMI·체지방률은 항상 자동으로 빠집니다.</div>
         <div className="text-dim small-note">심폐지구력·유연성처럼 비슷한 종목이 여러 개면, 다 측정해도 등급엔 1개만 반영됩니다(맨 앞 종목 우선). 특정 종목 하나만 쓰고 싶으면 나머지는 체크를 해제하세요.</div>
         <div className="category-groups">
           {EVENT_CATEGORY_GROUPS.map(g => {
@@ -3255,7 +3240,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
                     <button key={e.id} className={"chip event-chip" + (eventId === e.id ? " active" : "")} onClick={() => selectEvent(e.id)}>
                       {e.name}
                       {!NO_GRADE_EVENT_IDS.includes(e.id) && (
-                        <span className="chip-skip" onClick={(ev2) => toggleSkip(e.id, ev2)} title="사용(체크 해제 시 합불 판정용 평균 계산에서 제외)">
+                        <span className="chip-skip" onClick={(ev2) => toggleSkip(e.id, ev2)} title="사용(체크 해제 시 등급표에서 제외)">
                           <span className={"mini-check" + (!skippedEvents.includes(e.id) ? " on" : "")}>{!skippedEvents.includes(e.id) && <Check size={9} />}</span>
                         </span>
                       )}
@@ -4241,12 +4226,10 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
 
 /* ============================== 등급표 확인 ============================== */
 
-function GradeTable({ students, activeYear, studentValue, studentGrade, studentOverall, passGradeThreshold, settings, setSettings, isAdmin }) {
+function GradeTable({ students, activeYear, studentValue, studentGrade, settings, setSettings, isAdmin }) {
   const [mode, setMode] = useState("students"); // 'students' | 'reference'
   const [schoolGrade, setSchoolGrade] = useState("ALL");
   const [classNum, setClassNum] = useState("ALL");
-  const [passFilter, setPassFilter] = useState("ALL"); // ALL | PASS | FAIL
-  const [gradeFilter, setGradeFilter] = useState("ALL"); // ALL | 1~5
   const [genderFilter, setGenderFilter] = useState("ALL"); // ALL | M | F
   const [schoolNameDraft, setSchoolNameDraft] = useState(settings.schoolName || "");
   const [hiddenAllByEvent, setHiddenAllByEvent] = useState({ bmi: true, bodyfat: true });
@@ -4294,37 +4277,11 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
     };
   }, [students, schoolGrade, classNum]);
 
-  const filtered = useMemo(() => {
+  const finalList = useMemo(() => {
     return students
       .filter(s => (schoolGrade === "ALL" || s.grade === Number(schoolGrade)) && (classNum === "ALL" || s.classNum === Number(classNum)) && (genderFilter === "ALL" || s.gender === genderFilter))
       .sort((a, b) => a.grade - b.grade || a.classNum - b.classNum || a.number - b.number);
   }, [students, schoolGrade, classNum, genderFilter]);
-
-  const withOverall = useMemo(() =>
-    filtered.map(s => ({ s, overall: studentOverall(s, activeYear) }))
-  , [filtered, studentOverall, activeYear]);
-
-  const passCounts = useMemo(() => {
-    let pass = 0, fail = 0;
-    withOverall.forEach(({ overall }) => {
-      if (overall.grade === null) return;
-      if (overall.pass) pass++; else fail++;
-    });
-    return { pass, fail };
-  }, [withOverall]);
-
-  const gradeCounts = useMemo(() => {
-    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    withOverall.forEach(({ overall }) => { if (overall.grade) counts[overall.grade]++; });
-    return counts;
-  }, [withOverall]);
-
-  const finalList = useMemo(() => withOverall.filter(({ overall }) => {
-    if (passFilter === "PASS" && !(overall.grade !== null && overall.pass)) return false;
-    if (passFilter === "FAIL" && !(overall.grade !== null && !overall.pass)) return false;
-    if (gradeFilter !== "ALL" && overall.grade !== Number(gradeFilter)) return false;
-    return true;
-  }), [withOverall, passFilter, gradeFilter]);
 
   return (
     <div>
@@ -4333,40 +4290,27 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
           options={[{ id: "students", label: "우리 학생 기록" }, { id: "reference", label: "학년별 참고기준표" }]} />
       </div>
       <div className="text-dim small-note">
-        <b>합불 판정용 평균</b>은 각 종목 등급을 평균 낸 참고용 수치입니다. 교육부 공식 자료에는 여러 종목을
-        하나로 합산하는 산출법이 없으며, 실제 나이스 제출은 종목별 개별 등급을 사용합니다.
+        이 표의 <b>등급</b>은 종목별 기록을 교육부 공식 등급 기준표와 비교한 참고용 정보입니다. 나이스 제출은
+        이 프로그램에 기록한 종목별 실측값을 그대로 사용하며, 등급 표기는 프로그램 내부 참고용일 뿐 제출·합불 판정과는 무관합니다.
       </div>
 
-      {mode === "students" && (
+      {mode === "students" && isAdmin && (
         <div className="panel">
-          <h3>합격 기준</h3>
-          {isAdmin ? (
-            <>
-              <div className="form-row">
-                <label>합격 기준 (각 종목 등급의 평균이 이 등급 이하면 합격)</label>
-                <select className="select" value={settings.passGradeThreshold}
-                  onChange={e => setSettings({ ...settings, passGradeThreshold: Number(e.target.value) })}>
-                  {[1, 2, 3, 4, 5].map(g => <option key={g} value={g}>{g}등급 이내 합격</option>)}
-                </select>
-              </div>
-              <div className="form-row">
-                <label>학교명 (전광판 상단 표시, 선택)</label>
-                <div className="pw-row">
-                  <input className="input" value={schoolNameDraft} onChange={e => setSchoolNameDraft(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") saveSchoolName(); }} placeholder="예: OO중학교" />
-                  <button
-                    className={"btn btn-primary school-save-btn" + (schoolNameDraft !== (settings.schoolName || "") ? " pending" : "")}
-                    disabled={schoolNameDraft === (settings.schoolName || "")}
-                    onClick={saveSchoolName}
-                  >
-                    <Check size={16} /> 저장
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="text-dim small-note">합격 기준: 평균 {passGradeThreshold}등급 이내</div>
-          )}
+          <h3>학교 설정</h3>
+          <div className="form-row">
+            <label>학교명 (전광판 상단 표시, 선택)</label>
+            <div className="pw-row">
+              <input className="input" value={schoolNameDraft} onChange={e => setSchoolNameDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") saveSchoolName(); }} placeholder="예: OO중학교" />
+              <button
+                className={"btn btn-primary school-save-btn" + (schoolNameDraft !== (settings.schoolName || "") ? " pending" : "")}
+                disabled={schoolNameDraft === (settings.schoolName || "")}
+                onClick={saveSchoolName}
+              >
+                <Check size={16} /> 저장
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -4379,7 +4323,7 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
         </div>
       ) : (
         <div className="panel">
-          <h3>건강체력등급표 · 학생별 등급/합불 확인 <span className="text-dim entry-year-tag">{activeYear}년</span></h3>
+          <h3>건강체력등급표 · 학생별 종목별 등급 확인 <span className="text-dim entry-year-tag">{activeYear}년</span></h3>
           <div className="board-filters compact">
             <FilterChips label="학년" value={schoolGrade} onChange={(v) => { setSchoolGrade(v); setClassNum("ALL"); }}
               options={[{ id: "ALL", label: "전체" }, ...schoolGrades.map(g => ({ id: String(g), label: g + "학년" }))]} />
@@ -4390,17 +4334,6 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                 { id: "ALL", label: "전체 (" + genderCounts.total + "명)" },
                 { id: "M", label: "남 (" + genderCounts.M + "명)" },
                 { id: "F", label: "여 (" + genderCounts.F + "명)" },
-              ]} />
-            <FilterChips label="합불" value={passFilter} onChange={setPassFilter}
-              options={[
-                { id: "ALL", label: "전체 (" + withOverall.length + "명)" },
-                { id: "PASS", label: "합격 (" + passCounts.pass + "명)" },
-                { id: "FAIL", label: "불합격 (" + passCounts.fail + "명)" },
-              ]} />
-            <FilterChips label="등급" value={gradeFilter} onChange={setGradeFilter}
-              options={[
-                { id: "ALL", label: "전체" },
-                ...[1, 2, 3, 4, 5].map(g => ({ id: String(g), label: g + "등급 (" + gradeCounts[g] + "명)" })),
               ]} />
           </div>
           <div className="table-wrap">
@@ -4419,11 +4352,10 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                       )}
                     </th>
                   ))}
-                  <th>합불</th>
                 </tr>
               </thead>
               <tbody>
-                {finalList.map(({ s, overall }) => {
+                {finalList.map(s => {
                   return (
                     <tr key={s.id}>
                       <td className="student-cell">
@@ -4472,25 +4404,16 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                           </td>
                         );
                       })}
-                      <td>
-                        {overall.grade === null ? (
-                          <span className="pass-badge pending">측정필요</span>
-                        ) : overall.pass ? (
-                          <span className="pass-badge pass"><CheckCircle2 size={14} /> 합격</span>
-                        ) : (
-                          <span className="pass-badge fail"><XCircle size={14} /> 불합격</span>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
                 {finalList.length === 0 && (
-                  <tr><td colSpan={visibleEvents.length + 2} className="text-dim">해당 조건의 학생이 없습니다.</td></tr>
+                  <tr><td colSpan={visibleEvents.length + 1} className="text-dim">해당 조건의 학생이 없습니다.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          <div className="table-foot text-dim">합격 기준: 평균 {passGradeThreshold}등급 이내 (기준설정 화면에서 변경 가능) · BMI는 성장 확인용으로 등급·합불에 반영되지 않습니다.</div>
+          <div className="table-foot text-dim">등급은 종목별 참고 정보이며, BMI는 성장 확인용 참고 지표로 등급 산정에 포함되지 않습니다.</div>
         </div>
       )}
     </div>
@@ -4520,8 +4443,8 @@ function ReferenceGradeTable({ defaultLevel }) {
           <CheckCircle2 size={16} />
           <span>
             BMI는 교육부 학생건강정보센터 자료의 <b>마름/정상/과체중/경도비만/고도비만</b> 공식
-            분류를 그대로 사용합니다. 다른 종목과 달리 등급(1~5등급)으로 나누지 않으며, 합불 판정용
-            평균에도 반영되지 않는 성장 확인용 참고 지표입니다.
+            분류를 그대로 사용합니다. 다른 종목과 달리 등급(1~5등급)으로 나누지 않으며, 등급 산정에도
+            포함되지 않는 성장 확인용 참고 지표입니다.
           </span>
         </div>
       ) : isBodyfat ? (
@@ -4530,7 +4453,7 @@ function ReferenceGradeTable({ defaultLevel }) {
           <span>
             체지방률은 교육부 학생건강정보센터 자료의 <b>마름/정상/과체중/경도비만/고도비만</b> 공식
             분류를 그대로 사용합니다(전 학년 공통, 성별로만 구분). 다른 종목과 달리 등급(1~5등급)으로
-            나누지 않으며, 합불 판정용 평균에도 반영되지 않는 성장 확인용 참고 지표입니다.
+            나누지 않으며, 등급 산정에도 포함되지 않는 성장 확인용 참고 지표입니다.
           </span>
         </div>
       ) : isOfficial ? (
@@ -6447,10 +6370,6 @@ function PapsStyles({ children }) {
         .grade-table .grade-dot.small { width: 24px; height: 24px; font-size: 13px; }
         .table-foot { margin-top: 10px; font-size: 11px; }
 
-        .pass-badge { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; }
-        .pass-badge.pass { background: rgba(127,217,138,0.15); color: #7FD98A; }
-        .pass-badge.fail { background: rgba(232,93,93,0.15); color: #E85D5D; }
-        .pass-badge.pending { background: rgba(255,255,255,0.06); color: var(--text-dim); }
 
         .band-table { margin-bottom: 14px; }
         .band-head-row, .band-row { display: grid; grid-template-columns: 50px 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
