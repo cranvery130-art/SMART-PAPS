@@ -5021,6 +5021,7 @@ const NEIS_FIELD_RULES = [
   { field: "longjump", label: "제자리멀리뛰기", test: h => /제자리|멀리뛰기/.test(h) },
   { field: "fifty_m", label: "50m달리기", test: h => /50\s*m|50\s*미터/i.test(h) },
   { field: "bodyfat", label: "체지방률", test: h => /체지방/.test(h) },
+  { field: "bmi_value", label: "BMI", test: h => /BMI/i.test(h) || /체질량\s*지수/.test(h) },
   { field: "bmi_height", label: "신장", test: h => /신장|키\(/.test(h) || /^키$/.test(h) },
   { field: "bmi_weight", label: "체중", test: h => /체중|몸무게/.test(h) },
 ];
@@ -5048,6 +5049,7 @@ const NEIS_FIELD_OPTIONS = [
   { field: "gripstrength_1_right", label: "악력 1차 오른쪽" },
   { field: "gripstrength_2_left", label: "악력 2차 왼쪽" },
   { field: "gripstrength_2_right", label: "악력 2차 오른쪽" },
+  { field: "bmi_value", label: "BMI(신장·체중으로 자동 계산된 값)" },
   { field: "bmi_height", label: "신장" },
   { field: "bmi_weight", label: "체중" },
 ];
@@ -5073,6 +5075,7 @@ function neisFieldValue(student, field, records, activeYear) {
   if (field === "student_class") return v(student.classNum);
   if (field === "student_number") return v(student.number);
   if (field === "student_name") return student.name;
+  if (field === "bmi_value") return v(records[recKey(student.id, "bmi", activeYear)]?.value);
   if (field === "bmi_height") return v(records[recKey(student.id, "bmi", activeYear)]?.parts?.height);
   if (field === "bmi_weight") return v(records[recKey(student.id, "bmi", activeYear)]?.parts?.weight);
   if (field.startsWith("sitreach_")) return v(records[recKey(student.id, "sitreach", activeYear)]?.parts?.["trial" + field.slice(-1)]);
@@ -5194,7 +5197,8 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
       <div className="text-dim small-note">
         나이스에서 받은 진짜 양식 파일을 여기에 첨부하면, 이 프로그램의 기록을 열 이름에 맞춰
         자동으로 채워줍니다. <b>어떤 열이 무엇으로 인식됐는지 꼭 확인하고</b>, 필요하면 아래에서
-        직접 바꾼 뒤 반영해 주세요.
+        직접 바꾼 뒤 반영해 주세요. "신장"·"체중" 열은 입력한 값 그대로, "BMI" 열은
+        신장·체중으로 계산된 BMI 수치 자체가 채워집니다.
       </div>
 
       <input id="neis-template-input" ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="visually-hidden-input" onChange={handleFile} />
