@@ -2848,10 +2848,10 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
     }));
   }, [filtered, students, unit, gender, schoolGrade, eventId, isOverall, studentValue, studentGrade, studentAvgGrade, activeYear, ev]);
 
-  // 전체 화면 랭킹모드: 활성화된 모든 종목(+종합)의 상위 3명을 한 화면에 카드로 모아 보여준다.
+  // 전체 화면 랭킹모드: 활성화된 모든 종목의 상위 3명을 한 화면에 카드로 모아 보여준다.
   const overviewData = useMemo(() => {
     if (boardMode !== "all") return [];
-    const allEvs = [...activeEvents, { id: "overall", name: "종합(참고용 평균)", unit: "", better: "low" }];
+    const allEvs = activeEvents;
     return allEvs.map(e2 => {
       const list = filtered
         .map(s => {
@@ -2909,7 +2909,7 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
               label="종목"
               value={eventId}
               onChange={setEventId}
-              options={[...EVENTS.map(e => ({ id: e.id, label: e.name })), { id: "overall", label: "종합(참고용 평균)" }]}
+              options={EVENTS.map(e => ({ id: e.id, label: e.name }))}
             />
           </>
         )}
@@ -3242,7 +3242,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
     <div className="record-mgmt">
       <div className="panel">
         <h3>종목 선택</h3>
-        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표의 종합등급 계산에서 빠짐). BMI·체지방률은 항상 자동으로 빠집니다.</div>
+        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표의 합불 판정용 평균 계산에서 빠짐). BMI·체지방률은 항상 자동으로 빠집니다.</div>
         <div className="text-dim small-note">심폐지구력·유연성처럼 비슷한 종목이 여러 개면, 다 측정해도 등급엔 1개만 반영됩니다(맨 앞 종목 우선). 특정 종목 하나만 쓰고 싶으면 나머지는 체크를 해제하세요.</div>
         <div className="category-groups">
           {EVENT_CATEGORY_GROUPS.map(g => {
@@ -3255,7 +3255,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
                     <button key={e.id} className={"chip event-chip" + (eventId === e.id ? " active" : "")} onClick={() => selectEvent(e.id)}>
                       {e.name}
                       {!NO_GRADE_EVENT_IDS.includes(e.id) && (
-                        <span className="chip-skip" onClick={(ev2) => toggleSkip(e.id, ev2)} title="사용(체크 해제 시 종합등급 계산에서 제외)">
+                        <span className="chip-skip" onClick={(ev2) => toggleSkip(e.id, ev2)} title="사용(체크 해제 시 합불 판정용 평균 계산에서 제외)">
                           <span className={"mini-check" + (!skippedEvents.includes(e.id) ? " on" : "")}>{!skippedEvents.includes(e.id) && <Check size={9} />}</span>
                         </span>
                       )}
@@ -4333,7 +4333,7 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
           options={[{ id: "students", label: "우리 학생 기록" }, { id: "reference", label: "학년별 참고기준표" }]} />
       </div>
       <div className="text-dim small-note">
-        "종합등급"은 각 종목 등급을 평균 낸 <b>참고용 수치</b>입니다. 교육부 공식 자료에는 여러 종목을
+        <b>합불 판정용 평균</b>은 각 종목 등급을 평균 낸 참고용 수치입니다. 교육부 공식 자료에는 여러 종목을
         하나로 합산하는 산출법이 없으며, 실제 나이스 제출은 종목별 개별 등급을 사용합니다.
       </div>
 
@@ -4343,7 +4343,7 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
           {isAdmin ? (
             <>
               <div className="form-row">
-                <label>종합등급(참고용 평균) 합격 기준 (이 등급 이하면 합격)</label>
+                <label>합격 기준 (각 종목 등급의 평균이 이 등급 이하면 합격)</label>
                 <select className="select" value={settings.passGradeThreshold}
                   onChange={e => setSettings({ ...settings, passGradeThreshold: Number(e.target.value) })}>
                   {[1, 2, 3, 4, 5].map(g => <option key={g} value={g}>{g}등급 이내 합격</option>)}
@@ -4365,7 +4365,7 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
               </div>
             </>
           ) : (
-            <div className="text-dim small-note">합격 기준: 종합 {passGradeThreshold}등급 이내</div>
+            <div className="text-dim small-note">합격 기준: 평균 {passGradeThreshold}등급 이내</div>
           )}
         </div>
       )}
@@ -4419,7 +4419,6 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                       )}
                     </th>
                   ))}
-                  <th>종합등급(참고용 평균)</th>
                   <th>합불</th>
                 </tr>
               </thead>
@@ -4474,11 +4473,6 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                         );
                       })}
                       <td>
-                        {overall.grade ? (
-                          <span className="grade-dot" style={{ background: GRADE_COLORS[overall.grade] }}>{overall.grade}</span>
-                        ) : <span className="text-dim">-</span>}
-                      </td>
-                      <td>
                         {overall.grade === null ? (
                           <span className="pass-badge pending">측정필요</span>
                         ) : overall.pass ? (
@@ -4491,12 +4485,12 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                   );
                 })}
                 {finalList.length === 0 && (
-                  <tr><td colSpan={visibleEvents.length + 3} className="text-dim">해당 조건의 학생이 없습니다.</td></tr>
+                  <tr><td colSpan={visibleEvents.length + 2} className="text-dim">해당 조건의 학생이 없습니다.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          <div className="table-foot text-dim">합격 기준: 종합 {passGradeThreshold}등급 이내 (기준설정 화면에서 변경 가능) · BMI는 성장 확인용으로 등급·합불에 반영되지 않습니다.</div>
+          <div className="table-foot text-dim">합격 기준: 평균 {passGradeThreshold}등급 이내 (기준설정 화면에서 변경 가능) · BMI는 성장 확인용으로 등급·합불에 반영되지 않습니다.</div>
         </div>
       )}
     </div>
@@ -4526,8 +4520,8 @@ function ReferenceGradeTable({ defaultLevel }) {
           <CheckCircle2 size={16} />
           <span>
             BMI는 교육부 학생건강정보센터 자료의 <b>마름/정상/과체중/경도비만/고도비만</b> 공식
-            분류를 그대로 사용합니다. 다른 종목과 달리 등급(1~5등급)으로 나누지 않으며, 종합등급에도
-            반영되지 않는 성장 확인용 참고 지표입니다.
+            분류를 그대로 사용합니다. 다른 종목과 달리 등급(1~5등급)으로 나누지 않으며, 합불 판정용
+            평균에도 반영되지 않는 성장 확인용 참고 지표입니다.
           </span>
         </div>
       ) : isBodyfat ? (
@@ -4536,7 +4530,7 @@ function ReferenceGradeTable({ defaultLevel }) {
           <span>
             체지방률은 교육부 학생건강정보센터 자료의 <b>마름/정상/과체중/경도비만/고도비만</b> 공식
             분류를 그대로 사용합니다(전 학년 공통, 성별로만 구분). 다른 종목과 달리 등급(1~5등급)으로
-            나누지 않으며, 종합등급에도 반영되지 않는 성장 확인용 참고 지표입니다.
+            나누지 않으며, 합불 판정용 평균에도 반영되지 않는 성장 확인용 참고 지표입니다.
           </span>
         </div>
       ) : isOfficial ? (
@@ -4685,9 +4679,41 @@ function parseRowsToStudents(rows) {
     const number = Number(row[colMap.number]);
     if (!grade || !classNum || !number) continue;
     const gender = normalizeGender(row[colMap.gender]);
-    result.push({ id: uid("stu"), grade, classNum, number, name: String(nameRaw).trim(), gender });
+    result.push({ grade, classNum, number, name: String(nameRaw).trim(), gender });
   }
   return result;
+}
+
+// 학년+반+번호가 같으면 "같은 학생"으로 보고 새로 추가하는 대신 이름(과 성별)만 최신
+// 값으로 갱신한다. 같은 엑셀 파일을 실수로 다시 올리거나(예: 이름이 안 보여서 재업로드해
+// 봤더니 또 하나 늘어나는 문제), 다음 학년도에 번호가 그대로인 학생 명단을 다시 올릴 때
+// 등, 학년·반·번호가 겹치는데도 매번 새 학생으로 중복 추가되는 것을 막기 위함이다.
+function mergeParsedStudents(existingStudents, parsedRows) {
+  const next = existingStudents.slice();
+  const added = [];
+  const updated = [];
+  parsedRows.forEach(row => {
+    const idx = next.findIndex(s => s.grade === row.grade && s.classNum === row.classNum && s.number === row.number);
+    if (idx >= 0) {
+      const prev = next[idx];
+      if (prev.name !== row.name || prev.gender !== row.gender) {
+        const merged = { ...prev, name: row.name, gender: row.gender };
+        next[idx] = merged;
+        updated.push(merged);
+      }
+    } else {
+      const created = { id: uid("stu"), ...row };
+      next.push(created);
+      added.push(created);
+    }
+  });
+  return { next, added, updated };
+}
+function describeBulkMergeResult(addedCount, updatedCount) {
+  if (addedCount > 0 && updatedCount > 0) return `${addedCount}명 추가, ${updatedCount}명 정보를 갱신했습니다(같은 학년·반·번호의 기존 학생으로 인식).`;
+  if (addedCount > 0) return `${addedCount}명을 일괄 추가했습니다.`;
+  if (updatedCount > 0) return `${updatedCount}명의 정보를 갱신했습니다(같은 학년·반·번호의 기존 학생으로 인식해 새로 추가하지 않았습니다).`;
+  return "변경 사항이 없습니다(이미 동일한 정보였습니다).";
 }
 
 function RosterManager({ students, setStudents, showToast, schoolGrades }) {
@@ -4775,21 +4801,23 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
 
   function bulkAdd() {
     const lines = bulkText.split("\n").map(l => l.trim()).filter(Boolean);
-    const added = [];
+    const parsed = [];
     lines.forEach(line => {
       const parts = line.split(/[,\t]+/).map(p => p.trim()).filter(Boolean);
       if (parts.length < 5) return;
       const [g, c, n, name, gender] = parts;
       const genderNorm = normalizeGender(gender);
-      added.push({ id: uid("stu"), grade: Number(g), classNum: Number(c), number: Number(n), name, gender: genderNorm });
+      parsed.push({ grade: Number(g), classNum: Number(c), number: Number(n), name, gender: genderNorm });
     });
-    if (added.length > 0) {
-      const next = [...studentsRef.current, ...added];
+    if (parsed.length > 0) {
+      // 학년+반+번호가 같은 기존 학생이 있으면 이름/성별만 갱신하고, 없을 때만 새로 추가한다
+      // (같은 명단을 실수로 두 번 붙여넣어도 중복 학생이 생기지 않게).
+      const { next, added, updated } = mergeParsedStudents(studentsRef.current, parsed);
       setStudents(next);
       studentsRef.current = next;
-      setLastBulkAddedIds(added.map(s => s.id));
+      setLastBulkAddedIds(added.length > 0 ? added.map(s => s.id) : null);
       setBulkText("");
-      showToast(added.length + "명을 일괄 추가했습니다.", "ok");
+      showToast(describeBulkMergeResult(added.length, updated.length), "ok");
     } else {
       showToast("형식을 확인해 주세요. 예) 1,3,12,홍길동,남", "warn");
     }
@@ -4818,27 +4846,31 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
     const results = await Promise.all(files.map(readFileAsStudents));
-    const allAdded = results.flatMap(r => r.added);
+    const allParsed = results.flatMap(r => r.added);
     const problemFiles = results.filter(r => !r.ok || r.added.length === 0).map(r => r.name);
 
-    if (allAdded.length > 0) {
-      // 항상 studentsRef(최신 값)를 기준으로 이어붙인다 — 파일을 읽는 동안(await) 다른
+    let added = [], updated = [];
+    if (allParsed.length > 0) {
+      // 항상 studentsRef(최신 값)를 기준으로 병합한다 — 파일을 읽는 동안(await) 다른
       // 드래그가 먼저 끝나 학생을 추가했을 수도 있으므로, 이 함수가 시작될 때 캡처했던
-      // students 클로저가 아니라 지금 가장 최신인 목록 위에 이어서 추가한다.
-      const next = [...studentsRef.current, ...allAdded];
-      setStudents(next);
-      studentsRef.current = next;
-      setLastBulkAddedIds(allAdded.map(s => s.id));
+      // students 클로저가 아니라 지금 가장 최신인 목록을 기준으로 삼는다. 학년+반+번호가
+      // 같은 기존 학생이 있으면 이름/성별만 갱신하고, 없을 때만 새로 추가한다 — 같은 엑셀
+      // 파일을 실수로(또는 이름이 안 보여서) 두 번 올려도 중복 학생이 생기지 않고, 오히려
+      // 그 재업로드로 누락된 이름을 다시 채워 넣을 수 있다.
+      const merged = mergeParsedStudents(studentsRef.current, allParsed);
+      added = merged.added;
+      updated = merged.updated;
+      setStudents(merged.next);
+      studentsRef.current = merged.next;
+      setLastBulkAddedIds(added.length > 0 ? added.map(s => s.id) : null);
     }
-    if (allAdded.length > 0 && problemFiles.length === 0) {
+    if (allParsed.length > 0 && problemFiles.length === 0) {
       showToast(
-        files.length > 1
-          ? `파일 ${files.length}개에서 총 ${allAdded.length}명을 불러왔습니다.`
-          : `${allAdded.length}명을 엑셀 파일에서 불러왔습니다.`,
+        (files.length > 1 ? `파일 ${files.length}개 — ` : "") + describeBulkMergeResult(added.length, updated.length),
         "ok"
       );
-    } else if (allAdded.length > 0 && problemFiles.length > 0) {
-      showToast(`${allAdded.length}명을 불러왔습니다. (인식 실패: ${problemFiles.join(", ")})`, "warn");
+    } else if (allParsed.length > 0 && problemFiles.length > 0) {
+      showToast(`${describeBulkMergeResult(added.length, updated.length)} (인식 실패: ${problemFiles.join(", ")})`, "warn");
     } else {
       showToast("엑셀 내용을 인식하지 못했습니다. 학년·반·번호·이름·성별 열을 확인해 주세요.", "warn");
     }
