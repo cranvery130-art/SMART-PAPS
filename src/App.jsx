@@ -602,6 +602,18 @@ async function saveWorkspaceCodeRemote(code) {
     return false;
   }
 }
+// 마감(학교 코드 완전 삭제) 시, 이 기기가 "마지막으로 쓰던 코드"로 기억해 둔 값도 함께
+// 지운다. 이걸 지우지 않으면, 마감 직후에는 첫 화면으로 잘 돌아가더라도 앱을 나갔다가
+// 다시 열 때(특히 모바일에서 브라우저/PWA를 새로 열 때) 이 기기가 방금 지운 코드를
+// 자동으로 다시 불러와 그 코드로 재접속을 시도하게 된다.
+async function clearSavedWorkspaceCode() {
+  try {
+    await storage.delete(WORKSPACE_CODE_KEY, false);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
 // ---- 접근 요청(열람 신청) 관련 저장소 ----
 // 열람 신청자는 관리자에게 안내받은 "학교 코드"와 "열람 비밀번호"를 직접
@@ -661,6 +673,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const pendingSchoolLevelRef = useRef("middle"); // 새 코드를 만들 때 고른 학교급(기존 코드면 무시됨)
   const pendingViewerPasswordRef = useRef(""); // 새 코드를 만들 때 함께 정한 접근 신청 비밀번호
   const pendingFounderPasswordRef = useRef(""); // 새 코드를 만들 때 정한(또는 기존 코드 재접속 시 입력한) 개설자 전용 비밀번호
+  // 방금 제출된 코드가 "새 코드 만들기"로 들어온 건지("create"), "코드로 로그인"으로
+  // 들어온 건지("login")를 기억해 둔다. 아직 아무도 만든 적 없는(또는 마감으로 방금
+  // 삭제된) 코드일 때, "새 코드 만들기"로 들어온 경우에만 지금 이 사람을 새 개설자로
+  // 만들고, "코드로 로그인"으로 들어왔거나(사람이 직접 입력하지 않고) 이 기기가 예전에
+  // 기억해 둔 코드를 자동으로 다시 불러온 경우에는 절대 새로 만들지 않는다 — 이걸 구분하지
+  // 않으면, 마감으로 지워진 코드를 다시 열었을 때(특히 이 기기가 예전 코드를 기억하고
+  // 있다가 자동으로 재접속을 시도할 때) 마치 아무 일도 없었다는 듯 새 빈 코드가 조용히
+  // 다시 만들어지는 문제가 있었다.
+  const pendingIntentRef = useRef("login");
   const [workspaceChecking, setWorkspaceChecking] = useState(true);
   const [role, setRole] = useState(null); // 'admin' | 'viewer' | 'pending' | 'blocked'
   const [isFounder, setIsFounder] = useState(false);
@@ -791,12 +812,13 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     })();
   }, []);
 
-  function submitWorkspaceCode(raw, schoolLevel, viewerPassword, founderPassword) {
+  function submitWorkspaceCode(raw, schoolLevel, viewerPassword, founderPassword, intent) {
     const code = sanitizeWorkspaceCode(raw);
     if (!code) return;
     pendingSchoolLevelRef.current = schoolLevel || "middle";
     pendingViewerPasswordRef.current = (viewerPassword || "").trim();
     pendingFounderPasswordRef.current = (founderPassword || "").trim();
+    pendingIntentRef.current = intent === "create" ? "create" : "login";
     saveWorkspaceCodeRemote(code);
     setWorkspaceCode(code);
   }
@@ -816,6 +838,43 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       const device = await loadDeviceRole(workspaceCode);
       if (cancelled) return;
       if (device) setMyDeviceId(device.id);
+
+      // 이 코드가 실제로 아직 존재하는지 먼저 확인한다. 마감으로 방금 삭제된 코드처럼, 이
+      // 기기에 예전 역할이 캐시되어 있거나(예전에 개설자·조회자·수정권한자였던 기기) 이
+      // 기기가 예전에 쓰던 코드를 자동으로 다시 불러온 경우, 설정(cfg)이 이미 사라졌다면
+      // 그 캐시된 역할을 그대로 믿어서는 안 된다. 이걸 확인하지 않으면, 마감으로 지워진
+      // 코드를 다시 열었을 때(특히 모바일에서 앱을 나갔다가 다시 열어 이 기기가 예전 코드를
+      // 자동으로 재접속 시도할 때) 아무 확인 절차 없이 조용히 새 빈 코드가 다시 만들어지거나
+      // (개설자였던 기기) 예전 권한이 유령처럼 되살아나 버리는(조회자·수정권한자였던 기기)
+      // 문제가 있었다.
+      const cfg = await loadConfig(workspaceCode);
+      if (cancelled) return;
+
+      if (!cfg) {
+        if (!device && pendingIntentRef.current === "create") {
+          // "새 코드 만들기"로 직접 제출한 경우에만, 지금 이 사람을 새 개설자로 만든다.
+          const newId = uid("dev");
+          await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
+          setMyDeviceId(newId);
+          setIsFounder(true);
+          setMyDisplayName("개설자");
+          setRole("admin");
+          setRoleChecking(false);
+          return;
+        }
+        // 그 외의 경우(존재하지 않는 코드로 "코드로 로그인"을 시도했거나, 이 기기가 예전에
+        // 쓰던 코드를 자동으로 다시 불러왔거나, 이 기기가 예전에 이 코드로 뭔가 권한을
+        // 가졌었지만 지금은 코드 자체가 없는 경우)에는 조용히 새로 만들지 않는다. 이 기기에
+        // 남은 캐시(역할·마지막으로 쓰던 코드로 기억해 둔 값)를 정리해, 다음에 또 자동으로
+        // 이 코드를 불러오는 일이 없게 한다.
+        if (device) await clearDeviceRole(workspaceCode);
+        await clearSavedWorkspaceCode();
+        if (cancelled) return;
+        setRole("blocked");
+        setBlockReason("no-such-code");
+        setRoleChecking(false);
+        return;
+      }
 
       if (device && device.role === "admin") {
         // 이 기기가 "최초 개설자"인지 "승인받은 수정 권한자"인지 구분한다. 접근권한 목록에
@@ -856,23 +915,10 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         return;
       }
 
-      // 이 기기(계정)에 저장된 역할이 없는 경우.
-      const cfg = await loadConfig(workspaceCode);
-      if (!cfg) {
-        // 아직 아무도 만든 적 없는 새 코드 → 지금 만드는 사람이 최초 개설자(관리자)가 된다.
-        const newId = uid("dev");
-        await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
-        setMyDeviceId(newId);
-        setIsFounder(true);
-        setMyDisplayName("개설자");
-        setRole("admin");
-        setRoleChecking(false);
-        return;
-      }
-
-      // 이미 개설된 코드에 코드만 입력해 들어온 경우. 단, 이번에 함께 입력한 값이 "개설자
-      // 전용 비밀번호"와 정확히 일치하면(개설자 본인이 다른 기기로 넘어온 경우), 별도
-      // 승인 절차 없이 곧바로 개설자로 인정한다. 그 외에는 "접근 신청" 절차를 거쳐야 한다.
+      // 이 기기(계정)에 저장된 역할은 없지만, 코드 자체는 이미 존재하는 경우(위에서 cfg
+      // 확인으로 "존재하지 않는 코드"는 이미 걸러졌다). 단, 이번에 함께 입력한 값이
+      // "개설자 전용 비밀번호"와 정확히 일치하면(개설자 본인이 다른 기기로 넘어온 경우),
+      // 별도 승인 절차 없이 곧바로 개설자로 인정한다. 그 외에는 "접근 신청" 절차를 거쳐야 한다.
       const founderPw = cfg.settings?.founderPassword;
       if (founderPw && pendingFounderPasswordRef.current && pendingFounderPasswordRef.current === founderPw) {
         const newId = uid("dev");
@@ -1354,6 +1400,10 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
     await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
     await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+    // 이 기기가 "마지막으로 쓰던 코드"로 기억해 둔 값도 지운다. 그렇지 않으면 마감 직후
+    // 화면은 첫 화면으로 돌아가더라도, 앱을 나갔다가 다시 열 때(특히 모바일) 이 기기가
+    // 방금 지운 코드를 자동으로 다시 불러와 재접속을 시도하는 문제가 있었다.
+    await clearSavedWorkspaceCode().catch(() => {});
     // 이 기기에 남아있던 학생 이름표(익명화를 위해 로컬에만 저장해뒀던 실명 매핑)도 함께
     // 지운다 — 서버 데이터가 사라진 뒤에도 이 브라우저에만 실명이 남아있지 않도록 한다.
     try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
@@ -1800,7 +1850,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
 
   function submitCode() {
     if (!value.trim()) return;
-    onSubmit(value, schoolLevel, initialPassword, founderPassword);
+    onSubmit(value, schoolLevel, initialPassword, founderPassword, createOpen ? "create" : "login");
   }
 
   if (mode === "code") {
@@ -2176,6 +2226,21 @@ function PendingApprovalScreen({ name, type, onCancel }) {
 }
 
 function BlockedScreen({ reason, onRetry }) {
+  if (reason === "no-such-code") {
+    return (
+      <div className="paps-app gate-screen">
+        <div className="gate-card">
+          <Info size={32} color="var(--gold)" />
+          <h2>존재하지 않는 코드입니다</h2>
+          <p className="gate-desc">
+            입력하신 코드를 찾을 수 없습니다. 아직 만들어진 적이 없거나, 이미 "마감"으로
+            삭제된 코드일 수 있습니다. 코드를 다시 확인해 주시거나, 새로 만들어 주세요.
+          </p>
+          <button className="btn btn-primary" onClick={() => onRetry("code")}>처음으로</button>
+        </div>
+      </div>
+    );
+  }
   if (reason === "need-request") {
     return (
       <div className="paps-app gate-screen">
