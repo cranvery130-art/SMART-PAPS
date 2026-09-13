@@ -1817,6 +1817,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   const [showInitialPassword, setShowInitialPassword] = useState(false);
   const [founderPassword, setFounderPassword] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [createNotesOpen, setCreateNotesOpen] = useState(false); // "새 코드 만들기" 화면의 설명문을 접어두는 토글
   const [showFounderPassword, setShowFounderPassword] = useState(false);
   const [agree, setAgree] = useState(false);
   const [name, setName] = useState("");
@@ -1895,10 +1896,33 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
                 onChange={e => setValue(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
               />
-              <div className="text-dim small-note gate-code-warn">
-                학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
-                알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
-                이름을 추천합니다.
+              <div className="gate-pw-row">
+                <label>개설자 전용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showFounderPassword ? "text" : "password"}
+                    value={founderPassword}
+                    onChange={e => setFounderPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 원장선생님0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
+                </div>
+              </div>
+              <div className="gate-pw-row">
+                <label>안내용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showInitialPassword ? "text" : "password"}
+                    value={initialPassword}
+                    onChange={e => setInitialPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 체육0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowInitialPassword(v => !v)}>{showInitialPassword ? "숨기기" : "보기"}</button>
+                </div>
               </div>
               <div className="gate-level-row">
                 <label>학교급</label>
@@ -1915,54 +1939,41 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
                   ))}
                 </div>
               </div>
-              <div className="gate-pw-row">
-                <label>비밀번호 설정</label>
-                <div className="pw-row">
-                  <input
-                    className="input"
-                    type={showInitialPassword ? "text" : "password"}
-                    value={initialPassword}
-                    onChange={e => setInitialPassword(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                    placeholder="예: 체육0925"
-                  />
-                  <button type="button" className="btn btn-ghost small" onClick={() => setShowInitialPassword(v => !v)}>{showInitialPassword ? "숨기기" : "보기"}</button>
-                </div>
-                <div className="text-dim small-note gate-pw-hint">
-                  동료 교사가 접근 신청 시 입력할 비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
-                  연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
-                </div>
-              </div>
-              <div className="gate-pw-row">
-                <label>개설자 전용 비밀번호</label>
-                <div className="pw-row">
-                  <input
-                    className="input"
-                    type={showFounderPassword ? "text" : "password"}
-                    value={founderPassword}
-                    onChange={e => setFounderPassword(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                    placeholder="예: 원장선생님0925"
-                  />
-                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
-                </div>
-                <div className="text-dim small-note gate-pw-hint">
-                  선생님(개설자) 본인만 알아야 하는 비밀번호입니다. 나중에 다른 기기(휴대폰↔컴퓨터 등)에서
-                  같은 코드와 이 비밀번호를 "코드로 로그인" 화면에 입력하면, 승인 절차 없이 곧바로
-                  개설자로 다시 들어올 수 있어요. 위 "비밀번호 설정"과는 다른 값으로 정해주세요
-                  (동료 교사에게는 절대 알려주지 마세요).
-                </div>
-              </div>
               <button className="btn btn-primary big-btn" disabled={!value.trim()} onClick={submitCode}>
                 만들기
               </button>
-              <div className="gate-note">
-                <Info size={14} />
-                <span>
-                  이미 등록되어 있는 학교코드라면, 개설자 전용 비밀번호가 맞을 때만 개설자로
-                  들어가지고, 그 외에는 반영되지 않습니다.
-                </span>
-              </div>
+
+              {/* 화면이 복잡해 보이지 않도록, 꼭 필요할 때만 펼쳐보는 참고사항으로 설명문을
+                  모아둔다(코드 이름 주의사항, 두 비밀번호의 차이, 기존 코드 재사용 안내). */}
+              <button type="button" className="gate-link-btn gate-notes-toggle" onClick={() => setCreateNotesOpen(v => !v)}>
+                <Info size={13} /> 참고사항 {createNotesOpen ? "접기 ▲" : "보기 ▼"}
+              </button>
+              {createNotesOpen && (
+                <div className="gate-notes-panel">
+                  <div className="text-dim small-note gate-code-warn">
+                    <b>코드 이름:</b> 학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와
+                    학교 이름이 함께 알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼
+                    학교와 무관한 이름을 추천합니다.
+                  </div>
+                  <div className="text-dim small-note gate-pw-hint">
+                    <b>개설자 전용 비밀번호:</b> 선생님(개설자) 본인만 알아야 하는 비밀번호입니다.
+                    나중에 다른 기기(휴대폰↔컴퓨터 등)에서 같은 코드와 이 비밀번호를 "코드로 로그인"
+                    화면에 입력하면, 승인 절차 없이 곧바로 개설자로 다시 들어올 수 있어요. 아래
+                    "안내용 비밀번호"와는 다른 값으로 정해주세요(동료 교사에게는 절대 알려주지 마세요).
+                  </div>
+                  <div className="text-dim small-note gate-pw-hint">
+                    <b>안내용 비밀번호:</b> 동료 교사에게 안내해 접근 신청 시 입력하게 할
+                    비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
+                    연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로
+                    정해주세요.
+                  </div>
+                  <div className="text-dim small-note">
+                    <Info size={13} /> 이미 등록되어 있는 학교코드라면, 개설자 전용 비밀번호가
+                    맞을 때만 개설자로 들어가지고, 그 외에는 반영되지 않습니다.
+                  </div>
+                </div>
+              )}
+
               <button className="btn btn-ghost gate-back-toggle" onClick={() => setCreateOpen(false)}>
                 ← 코드로 로그인 화면으로 돌아가기
               </button>
@@ -6358,6 +6369,11 @@ function PapsStyles({ children }) {
         }
         .gate-link-btn:hover { background: rgba(255,255,255,0.07); border-color: var(--text-dim); }
         .gate-link-cta { display: inline-block; margin-top: 2px; color: var(--gold); font-weight: 700; font-size: 14px; }
+        .gate-notes-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; }
+        .gate-notes-panel { text-align: left; margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .gate-notes-panel .gate-code-warn, .gate-notes-panel .gate-pw-hint { margin: 0; }
+        .gate-notes-panel .text-dim.small-note { display: flex; gap: 6px; align-items: flex-start; }
+        .gate-notes-panel .text-dim.small-note svg { flex-shrink: 0; margin-top: 2px; }
         @media (max-width: 420px) {
           .gate-input { font-size: 17px; }
         }
