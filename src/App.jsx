@@ -4,7 +4,7 @@ import {
   ClipboardList, Monitor, X, Maximize2, Minimize2, AlertTriangle,
   CheckCircle2, XCircle, Info, Play,
   RotateCcw, Square, Smartphone, Copy,
-  FileSpreadsheet, Check, ShieldCheck, Database, Award, Download
+  FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { storage } from "./storage.js";
@@ -101,6 +101,17 @@ function mergeRecords(local, polled) {
 
 function thisYear() {
   return new Date().getFullYear();
+}
+
+// 실시간 측정 중 프로젝터·대형화면에 학생 이름이 그대로 노출되는 것을 막기 위한 이름
+// 마스킹("이름 마스킹 모드" 토글에서 사용). 2글자면 뒷글자, 3글자 이상이면 가운데 글자(들)를
+// 가린다(예: "김민" → "김*", "홍길동" → "홍*동", "황보영수" → "황**수"). 1글자 이름은 그대로 둔다.
+function maskStudentName(name) {
+  if (!name) return name;
+  const chars = Array.from(String(name));
+  if (chars.length <= 1) return name;
+  if (chars.length === 2) return chars[0] + "*";
+  return chars[0] + "*".repeat(chars.length - 2) + chars[chars.length - 1];
 }
 
 function fmtValue(v, unit) {
@@ -338,7 +349,7 @@ function buildDefaultConfig(schoolLevel, viewerPassword, founderPassword) {
   return {
     students: [],
     criteria: buildDefaultCriteria(lvl),
-    settings: { schoolName: "", schoolLevel: lvl, passGradeThreshold: 4, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
+    settings: { schoolName: "", schoolLevel: lvl, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
     createdAt: Date.now(),
   };
 }
@@ -421,6 +432,22 @@ function saveLocalNameMap(code, map) {
   }
 }
 const ANONYMOUS_NAME_PLACEHOLDER = "(이름 미확인 - 이 기기)";
+// 화면이 알고 있는 학생 이름을 이 기기의 로컬 이름표에 즉시(동기적으로) 반영한다.
+// 이름을 입력/추가한 시점에 곧바로 호출해야 한다 — 네트워크 저장(Firestore 왕복)이 끝나길
+// 기다렸다가 반영하면, 그 사이에 탭을 닫아버릴 경우 이름이 이 기기에 전혀 남지 않게 된다
+// (localStorage.setItem 자체는 동기 함수라 즉시 호출하면 탭이 곧바로 닫혀도 안전하다).
+function syncLocalNameMap(code, students) {
+  if (!code || !Array.isArray(students)) return;
+  const nameMap = loadLocalNameMap(code);
+  let changed = false;
+  students.forEach(s => {
+    if (s.name && s.name !== ANONYMOUS_NAME_PLACEHOLDER && nameMap[s.id] !== s.name) {
+      nameMap[s.id] = s.name;
+      changed = true;
+    }
+  });
+  if (changed) saveLocalNameMap(code, nameMap);
+}
 
 async function loadConfig(code) {
   try {
@@ -442,11 +469,9 @@ async function saveConfigRemote(code, obj) {
     if (obj && Array.isArray(obj.students)) {
       // 저장 직전에, 이 화면이 알고 있는 이름을 이 기기의 이름표(로컬 저장소)에 먼저
       // 반영해 둔다 — 그래야 다음에 이 기기에서 다시 불러올 때도 이름이 유지된다.
-      const nameMap = loadLocalNameMap(code);
-      obj.students.forEach(s => {
-        if (s.name && s.name !== ANONYMOUS_NAME_PLACEHOLDER) nameMap[s.id] = s.name;
-      });
-      saveLocalNameMap(code, nameMap);
+      // (보통은 persistConfig에서 이미 더 일찍 동기적으로 반영해두지만, saveConfigRemote를
+      // 직접 호출하는 다른 경로 — 백업 파일 불러오기 등 — 를 위해 여기서도 한 번 더 반영한다.)
+      syncLocalNameMap(code, obj.students);
       // 서버(Firestore)로 나가는 값에는 이름 필드 자체를 아예 넣지 않는다.
       const anonStudents = obj.students.map(({ id, grade, classNum, number, gender }) => ({ id, grade, classNum, number, gender }));
       payload = { ...obj, students: anonStudents };
@@ -649,8 +674,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [loadError, setLoadError] = useState(false);
   const [students, setStudents] = useState([]);
   const [criteria, setCriteria] = useState(null);
-  const [settings, setSettings] = useState({ schoolName: "", passGradeThreshold: 4, currentYear: thisYear() });
+  const [settings, setSettings] = useState({ schoolName: "", currentYear: thisYear() });
   const [records, setRecords] = useState({});
+  // 나이스 반영(NeisTemplateFiller)에서 첨부한 파일·인식결과·반영결과. 데이터백업 탭을
+  // 벗어났다가 다시 돌아오면 그 탭 내부 컴포넌트가 다시 마운트되면서 로컬 state가 초기화돼
+  // 방금 첨부·반영한 내용이 사라져 버리는 문제가 있었다. 세션 내내 유지되는 여기(최상위
+  // 컴포넌트)에 상태를 두어, 탭을 오가도 그대로 남아있게 한다.
+  const [neisFillState, setNeisFillState] = useState({
+    fileName: "", headerRow: null, dataRows: null, mapping: [], resultRows: null, sheetName: "Sheet1",
+  });
   const [view, setView] = useState("board");
   const [presentation, setPresentation] = useState(false);
   const [lastSync, setLastSync] = useState(null);
@@ -663,6 +695,10 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [presentationUnlocked, setPresentationUnlocked] = useState(false);
   const [lockPromptOpen, setLockPromptOpen] = useState(false);
   const [lockPromptError, setLockPromptError] = useState("");
+  // 공용 PC 자동 잠금(세션 타임아웃): 일정 시간 조작이 없으면 화면을 잠근다.
+  const [idleLocked, setIdleLocked] = useState(false);
+  const [idleLockError, setIdleLockError] = useState("");
+  const lastActivityRef = useRef(Date.now());
 
   const prevTopRef = useRef({});
   const configVersionRef = useRef(0);
@@ -692,6 +728,45 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       setPresentation(false);
     } else {
       setLockPromptError("비밀번호가 올바르지 않습니다.");
+    }
+  }
+
+  // 공용 PC(체육관·교무실 공용 컴퓨터 등)에 로그인된 채로 방치되어 다른 사람이 학생
+  // 개인정보에 접근하는 것을 막기 위한 자동 잠금. 로그인(코드 확인)이 끝난 뒤부터, 화면
+  // 조작(마우스·키보드·터치·스크롤)이 일정 시간(12분) 없으면 자동으로 잠긴다. 전광판
+  // 모드는 애초에 계속 켜두는 용도이고 이미 자체 잠금이 있으므로 이 타이머 대상에서
+  // 제외한다. 접근 신청 비밀번호가 설정되어 있지 않으면(=잠글 방법이 없으면) 아예
+  // 타이머를 켜지 않는다(그렇지 않으면 아무도 못 푸는 상태로 잠겨버릴 수 있다).
+  const IDLE_TIMEOUT_MS = 12 * 60 * 1000;
+  useEffect(() => {
+    if (presentation) return;
+    if (role !== "admin" && role !== "viewer") return;
+    if (!settings.viewerPassword) return;
+
+    lastActivityRef.current = Date.now();
+    const markActive = () => { lastActivityRef.current = Date.now(); };
+    const activityEvents = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "wheel"];
+    activityEvents.forEach(ev => window.addEventListener(ev, markActive, { passive: true }));
+
+    const timer = setInterval(() => {
+      if (Date.now() - lastActivityRef.current >= IDLE_TIMEOUT_MS) {
+        setIdleLocked(true);
+      }
+    }, 15000);
+
+    return () => {
+      activityEvents.forEach(ev => window.removeEventListener(ev, markActive));
+      clearInterval(timer);
+    };
+  }, [role, presentation, settings.viewerPassword]);
+
+  function handleIdleUnlockAttempt(pw) {
+    if (pw && settings.viewerPassword && pw === settings.viewerPassword) {
+      setIdleLocked(false);
+      setIdleLockError("");
+      lastActivityRef.current = Date.now();
+    } else {
+      setIdleLockError("비밀번호가 올바르지 않습니다.");
     }
   }
 
@@ -987,7 +1062,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setLoading(true);
         return;
       }
-      if (!finalCfg.settings) finalCfg.settings = { schoolName: "", passGradeThreshold: 4 };
+      if (!finalCfg.settings) finalCfg.settings = { schoolName: "" };
       if (!finalCfg.settings.currentYear) finalCfg.settings.currentYear = thisYear();
       const year = finalCfg.settings.currentYear;
 
@@ -1040,7 +1115,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         if (cfg) {
           setStudents(cfg.students || []);
           setCriteria(cfg.criteria || buildDefaultCriteria(cfg.settings?.schoolLevel));
-          setSettings(cfg.settings || { schoolName: "", passGradeThreshold: 4, currentYear: thisYear() });
+          setSettings(cfg.settings || { schoolName: "", currentYear: thisYear() });
         }
       } else {
         // 이 화면들에 머무는 동안에도, 다른 선생님이 그 사이에 새로 등록한 학생만큼은 놓치지
@@ -1112,17 +1187,28 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   /* ---------- 저장 헬퍼 ---------- */
   // 조회 전용(viewer) 권한은 어떤 경우에도 데이터를 쓰지 않도록 이중으로 막는다
   // (화면 자체에서도 입력/관리 탭을 보여주지 않지만, 안전장치를 하나 더 둔다).
-  const persistConfig = useCallback(async (nextStudents, nextCriteria, nextSettings) => {
-    if (role !== "admin") return;
+  const persistConfig = useCallback((nextStudents, nextCriteria, nextSettings) => {
+    if (role !== "admin") return Promise.resolve();
+    // 이름을 입력/추가하자마자, 서버 저장(아래 큐)을 기다리지 않고 이 기기의 로컬 이름표에
+    // 곧바로(동기적으로) 반영해 둔다. 그렇지 않으면 아직 네트워크 왕복(loadConfig→
+    // saveConfigRemote) 중일 때 탭을 닫아버릴 경우 방금 입력한 이름이 이 기기에 전혀
+    // 저장되지 않아, 다시 열었을 때 "(이름 미확인 - 이 기기)"로 보이는 문제가 생긴다.
+    if (nextStudents !== undefined) syncLocalNameMap(workspaceCode, nextStudents);
     // 저장 직전에 서버의 최신 값을 한 번 더 받아와서, 지금 바꾸는 항목이 아닌 나머지는
-    // 내 화면에 캐시된(어쩌면 오래된) 값이 아니라 최신 값을 그대로 유지한다.
-    const latest = await loadConfig(workspaceCode);
-    const cfg = {
-      students: nextStudents !== undefined ? nextStudents : (latest?.students ?? students),
-      criteria: nextCriteria !== undefined ? nextCriteria : (latest?.criteria ?? criteria),
-      settings: nextSettings !== undefined ? nextSettings : (latest?.settings ?? settings),
-    };
-    await saveConfigRemote(workspaceCode, cfg);
+    // 내 화면에 캐시된(어쩌면 오래된) 값이 아니라 최신 값을 그대로 유지한다. 엑셀 파일을
+    // 연달아 여러 번 드래그하는 등 이 저장이 겹쳐 호출될 수 있으므로, 기록 저장과 같은
+    // 큐를 통해 반드시 순서대로(하나씩) 진행되도록 한다 — 그렇지 않으면 나중에 시작했지만
+    // 먼저 끝난 저장이 최신 저장을 덮어써서, 방금 추가한 학생이 사라지는 문제가 생긴다.
+    return enqueueSave(async () => {
+      const latest = await loadConfig(workspaceCode);
+      const cfg = {
+        ...(latest || {}),
+        students: nextStudents !== undefined ? nextStudents : (latest?.students ?? students),
+        criteria: nextCriteria !== undefined ? nextCriteria : (latest?.criteria ?? criteria),
+        settings: nextSettings !== undefined ? nextSettings : (latest?.settings ?? settings),
+      };
+      await saveConfigRemote(workspaceCode, cfg);
+    });
   }, [students, criteria, settings, workspaceCode, role]);
 
   const persistRecords = useCallback(async (nextRecords) => {
@@ -1153,7 +1239,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setTimeout(() => setToast(t => (t && t.id) ? null : t), 4000);
       }
       const entry = { value, schoolGradeAtMeasure, updatedAt: Date.now() };
-      if (parts) entry.parts = parts;
       // 큐 덕분에 이 시점에는 같은 기기의 이전 저장이 이미 완전히 끝나 있으므로, 저장소의
       // 최신 값을 그대로 기준으로 삼아도 안전하다(다른 기기의 거의 동시 저장까지 대비해
       // 화면에 캐시된 값도 함께 참고한다).
@@ -1161,6 +1246,30 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       const base = mergeRecords(records, latest);
       const key = recKey(studentId, eventId, year);
       const prevValue = base[key]?.value;
+      if (parts) {
+        // 제자리멀리뛰기·앉아윗몸앞으로굽히기(1차/2차), 악력(1차/2차×좌우), BMI(신장/체중)처럼
+        // 한 종목 기록이 여러 하위 값으로 이뤄진 경우, 이 화면(컴포넌트)이 열려 있는 동안
+        // 다른 기기에서 그중 다른 하위 값만 먼저 저장했을 수 있다. 이때 이 화면에 아직 반영 안
+        // 된(값이 비어있는) 하위 항목까지 통째로 덮어써버리면, 방금 다른 기기가 저장한 값이
+        // 사라져버린다("1차는 있는데 2차가 어느 순간 없어짐" 같은 증상의 원인). 그래서 방금
+        // 서버에서 새로 받아온 이전 값을 바탕으로, 이번에 실제로 입력된(비어있지 않은) 하위
+        // 값만 덮어씌운다.
+        const prevParts = base[key]?.parts || {};
+        const mergedParts = { ...prevParts };
+        Object.keys(parts).forEach(k => {
+          if (parts[k] !== null && parts[k] !== undefined && !Number.isNaN(parts[k])) mergedParts[k] = parts[k];
+        });
+        entry.parts = mergedParts;
+        // 제자리멀리뛰기·앉아윗몸앞으로굽히기·악력처럼 "여러 번 측정 중 최고기록"을 대표값으로
+        // 쓰는 종목은, 방금 병합된 하위 값들을 기준으로 대표값도 다시 계산한다. 그렇지 않으면
+        // 이 기기가 자신이 입력한 값만으로 최고기록을 계산해 저장하기 때문에, 다른 기기가 먼저
+        // 저장해둔 더 좋은 하위 기록이 있어도(위에서 parts는 병합됐지만) 대표값(등급·순위·제출
+        // 양식 반영에 쓰이는 값)은 그보다 낮게 저장되어버리는 경우가 생길 수 있다.
+        if (eventId === "longjump" || eventId === "sitreach" || eventId === "gripstrength") {
+          const mergedNums = Object.values(mergedParts).filter(v => typeof v === "number" && !Number.isNaN(v));
+          if (mergedNums.length > 0) entry.value = Math.max(...mergedNums);
+        }
+      }
       const next = { ...base, [key]: entry };
       setRecords(next);
       setLastSync(Date.now());
@@ -1217,9 +1326,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 
   // 무료 요금제 등 자동 저장이 안 되는 환경을 위한 수동 백업/복원.
   const handleImportBackup = useCallback(async (payload) => {
-    if (role !== "admin") return;
+    if (role !== "admin" || !isFounder) return;
     const nextStudents = payload.students || [];
-    const nextSettings = payload.settings || { schoolName: "", passGradeThreshold: 4, currentYear: thisYear() };
+    const nextSettings = payload.settings || { schoolName: "", currentYear: thisYear() };
     const nextCriteria = payload.criteria || buildDefaultCriteria(nextSettings.schoolLevel);
     const nextRecords = payload.records || {};
     setStudents(nextStudents);
@@ -1231,7 +1340,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     await saveRecordsRemote(workspaceCode, nextRecords);
     setLastSync(Date.now());
     showToast("백업 파일을 불러왔습니다.", "ok");
-  }, [role, workspaceCode, showToast]);
+  }, [role, isFounder, workspaceCode, showToast]);
 
   // 학기 마감: 나이스 제출 등 사용 목적을 다한 뒤, 학생 개인정보를 계속 저장해둘 필요가
   // 없도록 기록·학생 명단뿐 아니라 이 학교 코드 자체(설정·접근권한·이력 등 전부)를 완전히
@@ -1291,18 +1400,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     const bands = getBands(eventId, student.gender, gradeAtMeasure);
     return computeGradeFromBands(r.value, bands);
   }, [records, getBands]);
-
-  const studentOverall = useCallback((student, year) => {
-    const skipped = computeEffectiveSkip(settings.skippedEvents);
-    // BMI는 학생 성장 확인용일 뿐 등급이 없으므로 항상 종합등급에서 제외한다.
-    const activeEvents = EVENTS.filter(ev => !skipped.has(ev.id));
-    const grades = activeEvents.map(ev => studentGrade(student, ev.id, year)).filter(g => g !== null);
-    if (grades.length === 0) return { grade: null, pass: null, count: 0 };
-    const avg = grades.reduce((a, b) => a + b, 0) / grades.length;
-    const rounded = Math.round(avg);
-    const pass = rounded <= (settings.passGradeThreshold || 4);
-    return { grade: rounded, avg, pass, count: grades.length };
-  }, [studentGrade, settings]);
 
   /* ---------- 창 닫기/새로고침 전 경고 ---------- */
   // 무료 요금제 등에서 입력 중이던 내용을 깜빡하고 창을 닫아 잃어버리는 걸 막기 위해,
@@ -1505,6 +1602,12 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             onCancel={() => { setLockPromptOpen(false); setLockPromptError(""); }}
           />
         )}
+        {idleLocked && (
+          <IdleLockScreen
+            error={idleLockError}
+            onUnlock={handleIdleUnlockAttempt}
+          />
+        )}
 
         {!bannerDismissed && !presentation && (
           <div className="info-banner">
@@ -1543,7 +1646,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               activeYear={activeYear}
               studentValue={studentValue}
               studentGrade={studentGrade}
-              studentOverall={studentOverall}
               skippedEvents={settings.skippedEvents || []}
               schoolGrades={schoolGrades}
               presentation={presentation}
@@ -1571,8 +1673,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               activeYear={activeYear}
               studentValue={studentValue}
               studentGrade={studentGrade}
-              studentOverall={studentOverall}
-              passGradeThreshold={settings.passGradeThreshold}
               settings={settings}
               setSettings={(next) => { setSettings(next); persistConfig(undefined, undefined, next); }}
               isAdmin={role === "admin"}
@@ -1611,6 +1711,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               showToast={showToast}
               workspaceCode={workspaceCode}
               myDisplayName={myDisplayName}
+              isFounder={isFounder}
+              neisFillState={neisFillState}
+              setNeisFillState={setNeisFillState}
             />
           )}
           {view === "closeout" && role === "admin" && isFounder && (
@@ -1621,6 +1724,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               settings={settings}
               onCloseout={performSemesterCloseout}
               workspaceCode={workspaceCode}
+              activeYear={activeYear}
             />
           )}
           {view === "access" && role === "admin" && (
@@ -1717,57 +1821,30 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           </button>
           <div className="gate-divider" />
 
-          <h2>코드로 로그인</h2>
-          <p className="gate-desc">
-            이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
-            바로 들어갈 수 있습니다.
-          </p>
-          <input
-            className="input big-input gate-input"
-            placeholder="예: 낭만체육123"
-            value={value}
-            onChange={e => setValue(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && value.trim() && !createOpen) submitCode(); }}
-          />
+          {/* "새 코드 만들기"를 제목 바로 아래(첫 화면에서 가장 먼저 보이는 위치)로 옮겨
+              처음 오는 선생님이 로그인 화면을 지나칠 필요 없이 바로 시작할 수 있게 한다. */}
           {!createOpen && (
             <>
-              <div className="gate-pw-row">
-                <label>개설자 전용 비밀번호</label>
-                <div className="pw-row">
-                  <input
-                    className="input"
-                    type={showFounderPassword ? "text" : "password"}
-                    value={founderPassword}
-                    onChange={e => setFounderPassword(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                    placeholder="예: 원장선생님0925"
-                  />
-                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
-                </div>
-              </div>
-              <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
-                로그인
-              </button>
-
-              <div className="gate-divider" />
-
-              <button className="gate-link-btn" onClick={() => setMode("notice")}>
-                이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
-              </button>
-              <div className="gate-input-hint">
-                동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
-              </div>
-
-              <div className="gate-divider" />
-
               <button className="btn btn-secondary big-btn gate-create-emphasis" onClick={() => setCreateOpen(true)}>
                 <Plus size={15} /> 처음이신가요? 새 코드 만들기
               </button>
+              <div className="gate-divider" />
             </>
           )}
 
           {createOpen && (
             <>
+              <h2>새 코드 만들기</h2>
+              <p className="gate-desc">
+                우리 학교만의 코드를 새로 만드세요. 학교 이름이 들어가지 않은 코드를 추천합니다.
+              </p>
+              <input
+                className="input big-input gate-input"
+                placeholder="새로 만들 코드 이름, 예: 낭만체육123"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+              />
               <div className="text-dim small-note gate-code-warn">
                 학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
                 알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
@@ -1821,7 +1898,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
                 </div>
                 <div className="text-dim small-note gate-pw-hint">
                   선생님(개설자) 본인만 알아야 하는 비밀번호입니다. 나중에 다른 기기(휴대폰↔컴퓨터 등)에서
-                  같은 코드와 이 비밀번호를 위 "코드로 로그인" 칸에 입력하면, 승인 절차 없이 곧바로
+                  같은 코드와 이 비밀번호를 "코드로 로그인" 화면에 입력하면, 승인 절차 없이 곧바로
                   개설자로 다시 들어올 수 있어요. 위 "비밀번호 설정"과는 다른 값으로 정해주세요
                   (동료 교사에게는 절대 알려주지 마세요).
                 </div>
@@ -1839,6 +1916,50 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
               <button className="btn btn-ghost gate-back-toggle" onClick={() => setCreateOpen(false)}>
                 ← 코드로 로그인 화면으로 돌아가기
               </button>
+              <div className="gate-divider" />
+            </>
+          )}
+
+          {!createOpen && (
+            <>
+              <h2>코드로 로그인</h2>
+              <p className="gate-desc">
+                이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
+                바로 들어갈 수 있습니다.
+              </p>
+              <input
+                className="input big-input gate-input"
+                placeholder="예: 낭만체육123"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+              />
+              <div className="gate-pw-row">
+                <label>개설자 전용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showFounderPassword ? "text" : "password"}
+                    value={founderPassword}
+                    onChange={e => setFounderPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 원장선생님0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
+                </div>
+              </div>
+              <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
+                로그인
+              </button>
+
+              <div className="gate-divider" />
+
+              <button className="gate-link-btn" onClick={() => setMode("notice")}>
+                이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
+              </button>
+              <div className="gate-input-hint">
+                동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
+              </div>
             </>
           )}
 
@@ -1942,11 +2063,11 @@ function UserManualModal({ onClose }) {
   const steps = [
     { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
     { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 끌어다 놓으면 한 번에 등록됩니다." },
-    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다." },
-    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 등급과 합격 여부를 바로 확인할 수 있습니다." },
+    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다. 체육관 등에서 화면을 여러 학생이 함께 보는 상황이라면, 화면 위쪽의 \"이름 가림\" 버튼을 눌러 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력할 수 있습니다." },
+    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
     { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
-    { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다." },
-    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다." },
+    { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다. 다운로드하면 삭제 안내 팝업이 함께 뜨니, 나이스 등록을 마쳤다면 컴퓨터에서 바로 지워주세요." },
+    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 필수인 JSON 백업 외에, 나중에 참고가 필요할 수도 있는 경우를 대비해 나이스 제출양식과 비슷한 형태의 엑셀로 전체 기록을 받아둘 수도 있습니다(선택). 이때 받는 백업 파일들은 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -1957,6 +2078,12 @@ function UserManualModal({ onClose }) {
         </div>
         <div className="modal-body">
           <div className="text-dim small-note">처음 쓰시는 분도 이 순서만 따라 하시면 됩니다.</div>
+          <div className="text-dim small-note">
+            <b>공용 PC 자동 잠금</b>: 접근 신청 비밀번호를 설정해 두면, 로그인 후 약 12분간
+            마우스·키보드 조작이 없을 때 화면이 자동으로 잠기고 비밀번호를 다시 입력해야
+            계속 쓸 수 있습니다. 체육관·교무실처럼 여러 사람이 함께 쓰는 컴퓨터에서 자리를
+            비웠을 때 학생 정보가 그대로 노출되는 것을 막기 위한 기능입니다.
+          </div>
           {steps.map((s, i) => (
             <div className="share-step" key={i}>
               <span className="share-step-num">{i + 1}</span>
@@ -1995,10 +2122,10 @@ function UserManualModal({ onClose }) {
                         그 기기에도 이름이 채워집니다.<br /><br />
                         <b>전광판 화면</b>은 어느 기기에서 보든 이름 대신 [학년-반-번호] 형태로만
                         표시됩니다(개인정보 보호를 위해 항상 가림).<br /><br />
-                        <b>이름이 그대로 들어가는 곳</b>: 데이터 백업의 "실명포함(교사보관용)" 옵션,
-                        나이스 제출용 엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을
-                        채워 넣으며, 실명이 필요한 목적이라 의도적으로 포함시킵니다. 다른 사람과
-                        공유할 땐 백업의 "익명화(외부공유용)" 옵션을 쓰면 이름 없이 내보낼 수 있어요.
+                        <b>이름이 그대로 들어가는 곳</b>: 데이터 백업(JSON) 파일, 나이스 제출용
+                        엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을 채워 넣으며,
+                        실명이 필요한 목적이라 의도적으로 포함시킵니다. JSON 백업은 여러 명이
+                        각자 백업하면 혼선이 생길 수 있어 개설자만 내보내고 불러올 수 있습니다.
                       </div>
                     )}
                   </>
@@ -2420,12 +2547,18 @@ function DeviceSyncGuideModal({ onClose }) {
       title: "동료 교사가 다른 기기에서 다시 들어와야 할 때",
       body: "이미 승인받은 것과 똑같은 이름 + 똑같은 권한 종류(수정 권한/조회)로 접근 신청을 다시 하면, 처음부터 다시 승인을 기다리지 않고 기존 승인을 그대로 이어받습니다. 이름을 정확히 똑같이 입력하는 게 중요해요.",
     },
+    {
+      title: "1년 지난 코드는 자동으로 마감됩니다",
+      body: "마감(전체 데이터 삭제)을 깜빡 잊고 넘어가는 경우를 대비해, 코드를 개설한 지 1년이 지나면 자동으로 마감 처리되어 기록·명단·설정이 모두 삭제되고 첫 화면으로 돌아갑니다. 만료 30일 전부터 개설자에게 경고 배너가 뜨고, 계속 쓰실 거라면 \"계속 사용(1년 연장)\" 버튼으로 기한을 늘릴 수 있습니다.",
+    },
   ];
   const cautions = [
     "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보가 사라져 다시 접근 절차를 밟아야 할 수 있습니다.",
     "같은 이름을 쓰는 동료 교사가 두 명 이상이면, 위 \"기존 승인 이어받기\" 기능 때문에 서로 같은 자리를 나눠 쓰게 될 수 있어요. 이름에 학년·반처럼 구분되는 정보를 꼭 포함해 주세요.",
     "개설자 전용 비밀번호는 동료 교사에게 알려주지 마세요 — 이걸 아는 사람은 승인 절차 없이 곧바로 전체 권한을 갖게 됩니다.",
+    "JSON 백업(내보내기·불러오기)은 개설자 기기에서만 할 수 있습니다. 여러 기기에서 각자 백업·복원하면 서로 다른 시점의 기록이 뒤섞일 수 있어, 백업은 개설자 한 명이 맡는 것을 권장합니다.",
     "인터넷 연결이 끊긴 상태에서 입력한 기록은 연결이 복구되어야 다른 기기에 반영됩니다.",
+    "1년 자동 마감은 되돌릴 수 없습니다. 계속 쓰실 코드라면 경고 배너가 뜰 때 꼭 \"계속 사용(1년 연장)\"을 눌러주세요.",
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2479,6 +2612,9 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
         "누가 언제 무엇을 바꿨는지 전부 기록 — 문제 발생 시 추적 가능",
         "승인·비밀번호 변경·마감 같은 민감한 조작은 개설자 1인만 — 통제된 접근 구조",
         "빔프로젝터 고정모드를 켜면 그 순간부터 자동으로 화면 잠김 — 교사가 자리를 비운 사이 학생의 임의 조작·확인 방지",
+        "공용 PC 자동 잠금(세션 타임아웃) — 로그인 후 약 12분간 조작이 없으면 화면이 자동으로 잠기고, 계속 쓰려면 비밀번호를 다시 입력해야 함",
+        "실시간 측정 중 이름 가림 모드 — 기록관리 화면에서 버튼 하나로 학생 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력 가능",
+        "다운로드한 파일 삭제 안내 — 나이스 반영·백업(엑셀/JSON) 파일을 내려받을 때마다, 등록을 마쳤다면 컴퓨터에서 삭제해 달라는 안내가 뜸",
       ],
     },
     {
@@ -2493,10 +2629,11 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
     {
       title: "데이터 관리",
       items: [
-        "백업 파일로 데이터 손실 위험 최소화",
+        "백업 파일로 데이터 손실 위험 최소화 — 여러 명이 각자 백업·복원하면 최신 기록이 뒤섞일 수 있어 개설자만 가능",
         "나이스 측정명단 양식 엑셀 파일 첨부로 명단 반영 — 학생관리에서 파일만 올리면 학년·반·번호·이름을 자동으로 채워줌",
         "나이스 '자료올리기'용 엑셀 형식 지원 — 프로그램 내 기록을 토대로 나이스 업로드 양식에 맞춰 채워줌",
         "마감 시 백업 필수화로 학생 개인정보 최소 보관",
+        "1년 지난 코드는 자동 마감 — 마감을 깜빡 잊어도 개설 1년 후 자동으로 전체 삭제되어 기록이 쌓이지 않음(만료 30일 전부터 경고, 연장 가능)",
       ],
     },
     {
@@ -2567,6 +2704,43 @@ function BoardLockPrompt({ onUnlock, onCancel, error }) {
           <div className="confirm-actions">
             <button className="btn btn-ghost" onClick={onCancel}>취소</button>
             <button className="btn btn-primary" onClick={() => onUnlock(pw)}>확인</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 공용 PC(체육관·교무실 공용 컴퓨터 등)에 마감 처리 전 상태로 화면이 켜진 채 방치되는 것을
+// 막기 위한 자동 잠금. 한동안(10~15분) 마우스·키보드 조작이 없으면 화면을 잠그고, 접근 신청
+// 비밀번호를 다시 입력해야 계속 쓸 수 있게 한다. 뒤로가기/닫기로 우회할 수 없도록 "취소"
+// 버튼을 두지 않는다(단, 브라우저를 새로고침하면 다시 열릴 수 있음 — 이 프로그램 전체가
+// "코드를 아는 사람은 접근 가능" 수준의 보안이라는 점과 같은 한계).
+function IdleLockScreen({ onUnlock, error }) {
+  const [pw, setPw] = useState("");
+  return (
+    <div className="modal-backdrop idle-lock-backdrop">
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><ShieldCheck size={18} /> 자동 잠금</h3>
+        </div>
+        <div className="modal-body">
+          <div className="text-dim small-note">
+            일정 시간 조작이 없어 화면이 자동으로 잠겼습니다(공용 PC에서 학생 개인정보 노출을
+            막기 위한 기능). 계속하려면 접근 신청 비밀번호를 입력해 주세요.
+          </div>
+          <input
+            className="input"
+            type="password"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            placeholder="접근 신청 비밀번호"
+            onKeyDown={e => { if (e.key === "Enter") onUnlock(pw); }}
+            autoFocus
+          />
+          {error && <div className="gate-error">{error}</div>}
+          <div className="confirm-actions">
+            <button className="btn btn-primary" onClick={() => onUnlock(pw)}>잠금 해제</button>
           </div>
         </div>
       </div>
@@ -2718,7 +2892,7 @@ function ShareGuideModal({ workspaceCode, onClose }) {
   );
 }
 
-function ScoreBoard({ students, records, activeYear, studentValue, studentGrade, studentOverall, skippedEvents, schoolGrades, presentation, setPresentation, onExitPresentation, lastSync }) {
+function ScoreBoard({ students, records, activeYear, studentValue, studentGrade, skippedEvents, schoolGrades, presentation, setPresentation, onExitPresentation, lastSync }) {
   const [boardMode, setBoardMode] = useState("single"); // 'single' | 'all'
   const [eventId, setEventId] = useState(EVENTS[0].id);
   const [unit, setUnit] = useState("student"); // 'student' | 'class'
@@ -2791,7 +2965,7 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
     if (isOverall) {
       // 종합 랭킹은 체력 종목(EVENTS)만 반영하고 BMI는 제외한다.
       // BMI는 순위 경쟁으로 노출되면 학생, 특히 여학생에게 민감할 수 있어
-      // 개인별 등급표(합불 확인) 용도로만 별도로 보여준다.
+      // 개인별 등급표(종목별 등급 참고) 용도로만 별도로 보여준다.
       const list = filtered
         .map(s => {
           const avg = studentAvgGrade(s);
@@ -2815,10 +2989,10 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
     }));
   }, [filtered, students, unit, gender, schoolGrade, eventId, isOverall, studentValue, studentGrade, studentAvgGrade, activeYear, ev]);
 
-  // 전체 화면 랭킹모드: 활성화된 모든 종목(+종합)의 상위 3명을 한 화면에 카드로 모아 보여준다.
+  // 전체 화면 랭킹모드: 활성화된 모든 종목의 상위 3명을 한 화면에 카드로 모아 보여준다.
   const overviewData = useMemo(() => {
     if (boardMode !== "all") return [];
-    const allEvs = [...activeEvents, { id: "overall", name: "종합(참고용 평균)", unit: "", better: "low" }];
+    const allEvs = activeEvents;
     return allEvs.map(e2 => {
       const list = filtered
         .map(s => {
@@ -2876,7 +3050,7 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
               label="종목"
               value={eventId}
               onChange={setEventId}
-              options={[...EVENTS.map(e => ({ id: e.id, label: e.name })), { id: "overall", label: "종합(참고용 평균)" }]}
+              options={EVENTS.map(e => ({ id: e.id, label: e.name }))}
             />
           </>
         )}
@@ -3111,6 +3285,21 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
   const ev = EVENT_MAP[eventId];
   const skippedEvents = settings.skippedEvents || [];
   const schoolGrades = gradesForLevel(settings.schoolLevel || "middle");
+  // 체육관 등에서 프로젝터·대형화면에 이 화면을 띄운 채 측정할 때, 학생 이름이 그대로
+  // 노출되지 않도록 "김*동" 형태로 가리는 모드. 기본은 꺼짐(평소 입력 편의를 위해 실명
+  // 표시), 필요할 때만 교사가 켠다. 화면을 새로고침하면 다시 꺼짐 상태로 돌아온다(측정
+  // 세션마다 매번 의식적으로 켜도록 하기 위함).
+  const [maskNames, setMaskNames] = useState(false);
+  // BMI 입력 화면에서 학생마다 하나씩 "직접 입력" 체크박스를 누르지 않아도, 버튼 하나로
+  // 현재 보이는 반 전체를 한 번에 전체선택/전체해제할 수 있게 하기 위한 신호(epoch가 바뀔
+  // 때마다 BmiRow들이 자신의 직접입력 모드를 forceValue로 맞춘다). 그 이후 개별 학생이
+  // 다시 체크박스를 직접 누르면 그 학생만 원래대로 개별 조정 가능하다.
+  const [bmiDirectEpoch, setBmiDirectEpoch] = useState(0);
+  const [bmiDirectForceValue, setBmiDirectForceValue] = useState(true);
+  function applyBmiDirectAll(value) {
+    setBmiDirectForceValue(value);
+    setBmiDirectEpoch(e => e + 1);
+  }
 
   const gradeStats = useMemo(() => {
     const stats = {};
@@ -3163,8 +3352,20 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
 
   const drillDown = (
     <div className="panel drill-panel">
-      <h3>학년 · 반별 기록 입력 <span className="board-cat">({ev.name}{ev.unit ? ", " + ev.unit : ""})</span></h3>
+      <div className="drill-panel-head">
+        <h3>학년 · 반별 기록 입력 <span className="board-cat">({ev.name}{ev.unit ? ", " + ev.unit : ""})</span></h3>
+        <button
+          type="button"
+          className={"btn btn-secondary small mask-toggle-btn" + (maskNames ? " active" : "")}
+          onClick={() => setMaskNames(v => !v)}
+          title="체육관 등 화면을 여러 사람이 함께 보는 상황에서, 학생 이름을 가려서 입력할 수 있어요."
+        >
+          {maskNames ? <EyeOff size={14} /> : <Eye size={14} />}
+          {maskNames ? "이름 가림: 켜짐" : "이름 가림: 꺼짐"}
+        </button>
+      </div>
       <div className="text-dim small-note">아래 학년·반 버튼을 눌러 학생을 고르세요. 숫자는 "입력 완료 인원 / 전체 인원"을 뜻합니다.</div>
+      {maskNames && <div className="text-dim small-note">이름을 "홍*동" 형태로 가리는 중입니다. 학번(번호) 순서는 그대로 보이니, 번호로 학생을 확인해 주세요.</div>}
       <div className="drill-row">
         {schoolGrades.map(g => (
           <button key={g} className={"drill-chip" + (grade === g ? " active" : "")} onClick={() => { setGrade(g); setClassNum(null); }}>
@@ -3191,11 +3392,19 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
           ))}
         </div>
       )}
+      {grade !== null && classNum !== null && eventId === "bmi" && classStudents.length > 0 && (
+        <div className="bmi-bulk-toggle-row">
+          <span className="text-dim small-note">직접 입력 일괄 설정:</span>
+          <button type="button" className="btn btn-secondary small" onClick={() => applyBmiDirectAll(true)}>전체 선택(직접 입력)</button>
+          <button type="button" className="btn btn-secondary small" onClick={() => applyBmiDirectAll(false)}>전체 해제(신장·체중 입력)</button>
+        </div>
+      )}
       {grade !== null && classNum !== null && (
         <div className="drill-students drill-scroll">
           {classStudents.length === 0 && <div className="text-dim">학생이 없습니다.</div>}
           {classStudents.map(s => (
-            <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"} />
+            <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"}
+              forceDirectMode={eventId === "bmi" ? { epoch: bmiDirectEpoch, value: bmiDirectForceValue } : undefined} maskNames={maskNames} />
           ))}
         </div>
       )}
@@ -3209,7 +3418,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
     <div className="record-mgmt">
       <div className="panel">
         <h3>종목 선택</h3>
-        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표의 종합등급 계산에서 빠짐). BMI·체지방률은 항상 자동으로 빠집니다.</div>
+        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표에서도 숨김 처리됨). BMI·체지방률은 항상 자동으로 빠집니다.</div>
         <div className="text-dim small-note">심폐지구력·유연성처럼 비슷한 종목이 여러 개면, 다 측정해도 등급엔 1개만 반영됩니다(맨 앞 종목 우선). 특정 종목 하나만 쓰고 싶으면 나머지는 체크를 해제하세요.</div>
         <div className="category-groups">
           {EVENT_CATEGORY_GROUPS.map(g => {
@@ -3222,7 +3431,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
                     <button key={e.id} className={"chip event-chip" + (eventId === e.id ? " active" : "")} onClick={() => selectEvent(e.id)}>
                       {e.name}
                       {!NO_GRADE_EVENT_IDS.includes(e.id) && (
-                        <span className="chip-skip" onClick={(ev2) => toggleSkip(e.id, ev2)} title="사용(체크 해제 시 종합등급 계산에서 제외)">
+                        <span className="chip-skip" onClick={(ev2) => toggleSkip(e.id, ev2)} title="사용(체크 해제 시 등급표에서 제외)">
                           <span className={"mini-check" + (!skippedEvents.includes(e.id) ? " on" : "")}>{!skippedEvents.includes(e.id) && <Check size={9} />}</span>
                         </span>
                       )}
@@ -3253,7 +3462,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
             {eventId === "fifty_m" ? (
               <FiftyMGroupTimer eventId={eventId} students={students} activeYear={activeYear} onSave={onSave} showToast={showToast} schoolGrades={schoolGrades} />
             ) : eventId === "run_walk" ? (
-              <ClassRunTimer eventId={eventId} students={students} activeYear={activeYear} onSave={onSave} showToast={showToast} />
+              <ClassRunTimer eventId={eventId} students={students} activeYear={activeYear} onSave={onSave} showToast={showToast} maskNames={maskNames} />
             ) : (
               <div className="text-dim small-note">이 종목은 별도 보조 도구가 없습니다. 아래에서 학년·반을 골라 바로 기록을 입력하세요.</div>
             )}
@@ -3302,7 +3511,7 @@ function EventInputRow(props) {
 // 스텝검사: 매뉴얼 실시방법 그대로, 스텝운동 종료 후 1분·2분·3분 시점의 심박수 3회를
 // 입력하면 심폐효율지수(PEI = 운동지속시간(초)×100 / (2×맥박수 합), 0.01단위에서 올림해 0.1단위로
 // 기록)를 자동 계산해 저장한다. 운동지속시간은 매뉴얼 규정대로 3분(180초) 완주를 기준으로 한다.
-function StepTestRow({ student, activeYear, studentValue, studentParts, onSave }) {
+function StepTestRow({ student, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const eventId = "step_test";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3332,7 +3541,7 @@ function StepTestRow({ student, activeYear, studentValue, studentParts, onSave }
 
   return (
     <div className="drill-student-row step-test-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="1" value={hr1} placeholder="1분 심박수"
         onChange={e => setHr1(e.target.value)} onBlur={() => commit(hr1, hr2, hr3)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <input className="input drill-student-input" type="number" step="1" value={hr2} placeholder="2분 심박수"
@@ -3354,7 +3563,7 @@ const FLEX_TOTAL_PARTS = [
   { key: "lower", label: "하체" },
 ];
 
-function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave }) {
+function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const eventId = "flex_total";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3393,7 +3602,7 @@ function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave 
 
   return (
     <div className="drill-student-row flex-total-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       {FLEX_TOTAL_PARTS.map(p => (
         <div className="flex-part-group" key={p.key}>
           <span className="flex-part-label">{p.label}</span>
@@ -3415,7 +3624,7 @@ function FlexTotalRow({ student, activeYear, studentValue, studentParts, onSave 
     </div>
   );
 }
-function SimpleRow({ student, eventId, activeYear, studentValue, onSave }) {
+function SimpleRow({ student, eventId, activeYear, studentValue, onSave, maskNames }) {
   const ev = EVENT_MAP[eventId];
   const existing = studentValue(student.id, eventId, activeYear);
   const [value, setValue] = useState(existing === null ? "" : String(existing));
@@ -3434,7 +3643,7 @@ function SimpleRow({ student, eventId, activeYear, studentValue, onSave }) {
 
   return (
     <div className="drill-student-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input
         className="input drill-student-input"
         type="number"
@@ -3451,7 +3660,7 @@ function SimpleRow({ student, eventId, activeYear, studentValue, onSave }) {
 }
 
 // 앉아윗몸앞으로굽히기 · 제자리멀리뛰기: 2회 측정해서 더 좋은 값을 기록에 반영한다.
-function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts, onSave }) {
+function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const ev = EVENT_MAP[eventId];
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3482,7 +3691,7 @@ function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts,
 
   return (
     <div className="drill-student-row two-trial">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={t1} placeholder={"1차" + (ev.unit ? "(" + ev.unit + ")" : "")}
         onChange={e => setT1(e.target.value)} onBlur={() => commit(t1, t2)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <input className="input drill-student-input" type="number" step="0.1" value={t2} placeholder={"2차" + (ev.unit ? "(" + ev.unit + ")" : "")}
@@ -3494,7 +3703,7 @@ function TwoTrialRow({ student, eventId, activeYear, studentValue, studentParts,
 }
 
 // 악력: 좌/우 각 2회씩 측정 → 각 손의 최고값을 구해 평균한 값을 기록에 반영한다.
-function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
+function GripRow({ student, activeYear, studentValue, studentParts, onSave, maskNames }) {
   const eventId = "gripstrength";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
@@ -3532,7 +3741,7 @@ function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
 
   return (
     <div className="drill-student-row grip-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={l1} placeholder="1차 좌"
         onChange={e => setL1(e.target.value)} onBlur={() => commit(l1, r1, l2, r2)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <input className="input drill-student-input" type="number" step="0.1" value={r1} placeholder="1차 우"
@@ -3551,18 +3760,33 @@ function GripRow({ student, activeYear, studentValue, studentParts, onSave }) {
 }
 
 // BMI: 신장·체중만 입력하면 자동 계산. 등급을 매기지 않고 또래 평균 대비 위치만 안내한다.
-function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel }) {
+function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel, forceDirectMode, maskNames }) {
   const eventId = "bmi";
   const existing = studentValue(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
   const [height, setHeight] = useState(parts ? String(parts.height ?? "") : "");
   const [weight, setWeight] = useState(parts ? String(parts.weight ?? "") : "");
+  // 신장·체중 대신 BMI 수치 자체를 이미 알고 있어 바로 입력하고 싶은 경우를 위한 직접입력
+  // 모드. 이 모드로 저장하면 신장·체중(parts) 없이 BMI 값만 저장된다.
+  const [directMode, setDirectMode] = useState(!parts && existing !== null);
+  const [directValue, setDirectValue] = useState(!parts && existing !== null ? String(existing) : "");
 
   useEffect(() => {
     const p = parts;
     setHeight(p ? String(p.height ?? "") : "");
     setWeight(p ? String(p.weight ?? "") : "");
+    if (!p && existing !== null) {
+      setDirectMode(true);
+      setDirectValue(String(existing));
+    }
   }, [existing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 상위(RecordManagementView)에서 "전체 선택/전체 해제" 버튼을 눌러 epoch가 바뀌면,
+  // 이 학생 행도 그 값으로 직접입력 모드를 일괄 전환한다(그 뒤엔 다시 개별로 바꿀 수 있음).
+  useEffect(() => {
+    if (!forceDirectMode || !forceDirectMode.epoch) return;
+    setDirectMode(forceDirectMode.value);
+  }, [forceDirectMode?.epoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function commit(nh, nw) {
     const h = nh === "" ? null : Number(nh);
@@ -3575,15 +3799,33 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
     await onSave(student.id, eventId, bmi, activeYear, gradeAtMeasure, { height: h, weight: w });
   }
 
+  async function commitDirect(nv) {
+    const v = nv === "" ? null : Number(nv);
+    if (v === null || Number.isNaN(v)) return;
+    if (v === existing && !parts) return;
+    const gradeAtMeasure = inferSchoolGradeAtYear(student, activeYear);
+    await onSave(student.id, eventId, v, activeYear, gradeAtMeasure, null);
+  }
+
   const refText = describeBmiCategory(existing, student, schoolLevel);
 
   return (
     <div className="drill-student-row bmi-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
-      <input className="input drill-student-input" type="number" step="0.1" value={height} placeholder="신장(cm)"
-        onChange={e => setHeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
-      <input className="input drill-student-input" type="number" step="0.1" value={weight} placeholder="체중(kg)"
-        onChange={e => setWeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
+      {directMode ? (
+        <input className="input drill-student-input" type="number" step="0.1" value={directValue} placeholder="BMI 수치"
+          onChange={e => setDirectValue(e.target.value)} onBlur={() => commitDirect(directValue)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+      ) : (
+        <>
+          <input className="input drill-student-input" type="number" step="0.1" value={height} placeholder="신장(cm)"
+            onChange={e => setHeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+          <input className="input drill-student-input" type="number" step="0.1" value={weight} placeholder="체중(kg)"
+            onChange={e => setWeight(e.target.value)} onBlur={() => commit(height, weight)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
+        </>
+      )}
+      <label className="bmi-direct-toggle">
+        <input type="checkbox" checked={directMode} onChange={e => setDirectMode(e.target.checked)} /> 직접 입력
+      </label>
       <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? "BMI " + existing : "-"}</span>
       {existing !== null && <span className="bmi-ref-tag">{refText}</span>}
     </div>
@@ -3592,7 +3834,7 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
 
 // 체지방률: 값 하나만 입력. BMI와 동일하게 등급을 매기지 않고, 종합등급에도 반영되지 않는
 // 성장 확인용 참고 지표다(공식 학년·성별 기준표가 없어 분류 문구는 따로 붙이지 않는다).
-function BodyFatRow({ student, activeYear, studentValue, onSave }) {
+function BodyFatRow({ student, activeYear, studentValue, onSave, maskNames }) {
   const eventId = "bodyfat";
   const existing = studentValue(student.id, eventId, activeYear);
   const [value, setValue] = useState(existing === null ? "" : String(existing));
@@ -3613,7 +3855,7 @@ function BodyFatRow({ student, activeYear, studentValue, onSave }) {
 
   return (
     <div className="drill-student-row bodyfat-row">
-      <span className="drill-student-name">{student.number}. {student.name}</span>
+      <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={value} placeholder="체지방률(%)"
         onChange={e => setValue(e.target.value)} onBlur={() => commit(value)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? existing + "%" : "-"}</span>
@@ -4035,7 +4277,7 @@ function TrackCourseCalculator({ students, schoolGrades, schoolLevel }) {
   );
 }
 
-function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
+function ClassRunTimer({ eventId, students, activeYear, onSave, showToast, maskNames }) {
   const [grade, setGrade] = useState(null);
   const [classNum, setClassNum] = useState(null);
   const [running, setRunning] = useState(false);
@@ -4140,7 +4382,7 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
               <div className="class-run-grid">
                 {remaining.map(s => (
                   <button key={s.id} className="class-run-btn" disabled={!running} onClick={() => markFinish(s)}>
-                    {s.number}. {s.name}
+                    {s.number}. {maskNames ? maskStudentName(s.name) : s.name}
                   </button>
                 ))}
                 {remaining.length === 0 && <div className="text-dim small-note">전원 완주했습니다.</div>}
@@ -4151,7 +4393,7 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
               <div className="class-run-finished-list">
                 {finished.map(s => (
                   <div className="class-run-finished-row" key={s.id}>
-                    <span className="class-run-finished-name">{s.number}. {s.name}</span>
+                    <span className="class-run-finished-name">{s.number}. {maskNames ? maskStudentName(s.name) : s.name}</span>
                     <input
                       className="input class-run-time-input"
                       type="number"
@@ -4182,12 +4424,10 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast }) {
 
 /* ============================== 등급표 확인 ============================== */
 
-function GradeTable({ students, activeYear, studentValue, studentGrade, studentOverall, passGradeThreshold, settings, setSettings, isAdmin }) {
+function GradeTable({ students, activeYear, studentValue, studentGrade, settings, setSettings, isAdmin }) {
   const [mode, setMode] = useState("students"); // 'students' | 'reference'
   const [schoolGrade, setSchoolGrade] = useState("ALL");
   const [classNum, setClassNum] = useState("ALL");
-  const [passFilter, setPassFilter] = useState("ALL"); // ALL | PASS | FAIL
-  const [gradeFilter, setGradeFilter] = useState("ALL"); // ALL | 1~5
   const [genderFilter, setGenderFilter] = useState("ALL"); // ALL | M | F
   const [schoolNameDraft, setSchoolNameDraft] = useState(settings.schoolName || "");
   const [hiddenAllByEvent, setHiddenAllByEvent] = useState({ bmi: true, bodyfat: true });
@@ -4235,37 +4475,11 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
     };
   }, [students, schoolGrade, classNum]);
 
-  const filtered = useMemo(() => {
+  const finalList = useMemo(() => {
     return students
       .filter(s => (schoolGrade === "ALL" || s.grade === Number(schoolGrade)) && (classNum === "ALL" || s.classNum === Number(classNum)) && (genderFilter === "ALL" || s.gender === genderFilter))
       .sort((a, b) => a.grade - b.grade || a.classNum - b.classNum || a.number - b.number);
   }, [students, schoolGrade, classNum, genderFilter]);
-
-  const withOverall = useMemo(() =>
-    filtered.map(s => ({ s, overall: studentOverall(s, activeYear) }))
-  , [filtered, studentOverall, activeYear]);
-
-  const passCounts = useMemo(() => {
-    let pass = 0, fail = 0;
-    withOverall.forEach(({ overall }) => {
-      if (overall.grade === null) return;
-      if (overall.pass) pass++; else fail++;
-    });
-    return { pass, fail };
-  }, [withOverall]);
-
-  const gradeCounts = useMemo(() => {
-    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    withOverall.forEach(({ overall }) => { if (overall.grade) counts[overall.grade]++; });
-    return counts;
-  }, [withOverall]);
-
-  const finalList = useMemo(() => withOverall.filter(({ overall }) => {
-    if (passFilter === "PASS" && !(overall.grade !== null && overall.pass)) return false;
-    if (passFilter === "FAIL" && !(overall.grade !== null && !overall.pass)) return false;
-    if (gradeFilter !== "ALL" && overall.grade !== Number(gradeFilter)) return false;
-    return true;
-  }), [withOverall, passFilter, gradeFilter]);
 
   return (
     <div>
@@ -4274,40 +4488,27 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
           options={[{ id: "students", label: "우리 학생 기록" }, { id: "reference", label: "학년별 참고기준표" }]} />
       </div>
       <div className="text-dim small-note">
-        "종합등급"은 각 종목 등급을 평균 낸 <b>참고용 수치</b>입니다. 교육부 공식 자료에는 여러 종목을
-        하나로 합산하는 산출법이 없으며, 실제 나이스 제출은 종목별 개별 등급을 사용합니다.
+        이 표의 <b>등급</b>은 종목별 기록을 교육부 공식 등급 기준표와 비교한 참고용 정보입니다. 나이스 제출은
+        이 프로그램에 기록한 종목별 실측값을 그대로 사용하며, 등급 표기는 프로그램 내부 참고용일 뿐 제출·합불 판정과는 무관합니다.
       </div>
 
-      {mode === "students" && (
+      {mode === "students" && isAdmin && (
         <div className="panel">
-          <h3>합격 기준</h3>
-          {isAdmin ? (
-            <>
-              <div className="form-row">
-                <label>종합등급(참고용 평균) 합격 기준 (이 등급 이하면 합격)</label>
-                <select className="select" value={settings.passGradeThreshold}
-                  onChange={e => setSettings({ ...settings, passGradeThreshold: Number(e.target.value) })}>
-                  {[1, 2, 3, 4, 5].map(g => <option key={g} value={g}>{g}등급 이내 합격</option>)}
-                </select>
-              </div>
-              <div className="form-row">
-                <label>학교명 (전광판 상단 표시, 선택)</label>
-                <div className="pw-row">
-                  <input className="input" value={schoolNameDraft} onChange={e => setSchoolNameDraft(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") saveSchoolName(); }} placeholder="예: OO중학교" />
-                  <button
-                    className={"btn btn-primary school-save-btn" + (schoolNameDraft !== (settings.schoolName || "") ? " pending" : "")}
-                    disabled={schoolNameDraft === (settings.schoolName || "")}
-                    onClick={saveSchoolName}
-                  >
-                    <Check size={16} /> 저장
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="text-dim small-note">합격 기준: 종합 {passGradeThreshold}등급 이내</div>
-          )}
+          <h3>학교 설정</h3>
+          <div className="form-row">
+            <label>학교명 (전광판 상단 표시, 선택)</label>
+            <div className="pw-row">
+              <input className="input" value={schoolNameDraft} onChange={e => setSchoolNameDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") saveSchoolName(); }} placeholder="예: OO중학교" />
+              <button
+                className={"btn btn-primary school-save-btn" + (schoolNameDraft !== (settings.schoolName || "") ? " pending" : "")}
+                disabled={schoolNameDraft === (settings.schoolName || "")}
+                onClick={saveSchoolName}
+              >
+                <Check size={16} /> 저장
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -4320,7 +4521,7 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
         </div>
       ) : (
         <div className="panel">
-          <h3>건강체력등급표 · 학생별 등급/합불 확인 <span className="text-dim entry-year-tag">{activeYear}년</span></h3>
+          <h3>건강체력등급표 · 학생별 종목별 등급 확인 <span className="text-dim entry-year-tag">{activeYear}년</span></h3>
           <div className="board-filters compact">
             <FilterChips label="학년" value={schoolGrade} onChange={(v) => { setSchoolGrade(v); setClassNum("ALL"); }}
               options={[{ id: "ALL", label: "전체" }, ...schoolGrades.map(g => ({ id: String(g), label: g + "학년" }))]} />
@@ -4331,17 +4532,6 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                 { id: "ALL", label: "전체 (" + genderCounts.total + "명)" },
                 { id: "M", label: "남 (" + genderCounts.M + "명)" },
                 { id: "F", label: "여 (" + genderCounts.F + "명)" },
-              ]} />
-            <FilterChips label="합불" value={passFilter} onChange={setPassFilter}
-              options={[
-                { id: "ALL", label: "전체 (" + withOverall.length + "명)" },
-                { id: "PASS", label: "합격 (" + passCounts.pass + "명)" },
-                { id: "FAIL", label: "불합격 (" + passCounts.fail + "명)" },
-              ]} />
-            <FilterChips label="등급" value={gradeFilter} onChange={setGradeFilter}
-              options={[
-                { id: "ALL", label: "전체" },
-                ...[1, 2, 3, 4, 5].map(g => ({ id: String(g), label: g + "등급 (" + gradeCounts[g] + "명)" })),
               ]} />
           </div>
           <div className="table-wrap">
@@ -4360,12 +4550,10 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                       )}
                     </th>
                   ))}
-                  <th>종합등급(참고용 평균)</th>
-                  <th>합불</th>
                 </tr>
               </thead>
               <tbody>
-                {finalList.map(({ s, overall }) => {
+                {finalList.map(s => {
                   return (
                     <tr key={s.id}>
                       <td className="student-cell">
@@ -4414,30 +4602,16 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, studentO
                           </td>
                         );
                       })}
-                      <td>
-                        {overall.grade ? (
-                          <span className="grade-dot" style={{ background: GRADE_COLORS[overall.grade] }}>{overall.grade}</span>
-                        ) : <span className="text-dim">-</span>}
-                      </td>
-                      <td>
-                        {overall.grade === null ? (
-                          <span className="pass-badge pending">측정필요</span>
-                        ) : overall.pass ? (
-                          <span className="pass-badge pass"><CheckCircle2 size={14} /> 합격</span>
-                        ) : (
-                          <span className="pass-badge fail"><XCircle size={14} /> 불합격</span>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
                 {finalList.length === 0 && (
-                  <tr><td colSpan={visibleEvents.length + 3} className="text-dim">해당 조건의 학생이 없습니다.</td></tr>
+                  <tr><td colSpan={visibleEvents.length + 1} className="text-dim">해당 조건의 학생이 없습니다.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          <div className="table-foot text-dim">합격 기준: 종합 {passGradeThreshold}등급 이내 (기준설정 화면에서 변경 가능) · BMI는 성장 확인용으로 등급·합불에 반영되지 않습니다.</div>
+          <div className="table-foot text-dim">등급은 종목별 참고 정보이며, BMI는 성장 확인용 참고 지표로 등급 산정에 포함되지 않습니다.</div>
         </div>
       )}
     </div>
@@ -4467,8 +4641,8 @@ function ReferenceGradeTable({ defaultLevel }) {
           <CheckCircle2 size={16} />
           <span>
             BMI는 교육부 학생건강정보센터 자료의 <b>마름/정상/과체중/경도비만/고도비만</b> 공식
-            분류를 그대로 사용합니다. 다른 종목과 달리 등급(1~5등급)으로 나누지 않으며, 종합등급에도
-            반영되지 않는 성장 확인용 참고 지표입니다.
+            분류를 그대로 사용합니다. 다른 종목과 달리 등급(1~5등급)으로 나누지 않으며, 등급 산정에도
+            포함되지 않는 성장 확인용 참고 지표입니다.
           </span>
         </div>
       ) : isBodyfat ? (
@@ -4477,7 +4651,7 @@ function ReferenceGradeTable({ defaultLevel }) {
           <span>
             체지방률은 교육부 학생건강정보센터 자료의 <b>마름/정상/과체중/경도비만/고도비만</b> 공식
             분류를 그대로 사용합니다(전 학년 공통, 성별로만 구분). 다른 종목과 달리 등급(1~5등급)으로
-            나누지 않으며, 종합등급에도 반영되지 않는 성장 확인용 참고 지표입니다.
+            나누지 않으며, 등급 산정에도 포함되지 않는 성장 확인용 참고 지표입니다.
           </span>
         </div>
       ) : isOfficial ? (
@@ -4626,9 +4800,41 @@ function parseRowsToStudents(rows) {
     const number = Number(row[colMap.number]);
     if (!grade || !classNum || !number) continue;
     const gender = normalizeGender(row[colMap.gender]);
-    result.push({ id: uid("stu"), grade, classNum, number, name: String(nameRaw).trim(), gender });
+    result.push({ grade, classNum, number, name: String(nameRaw).trim(), gender });
   }
   return result;
+}
+
+// 학년+반+번호가 같으면 "같은 학생"으로 보고 새로 추가하는 대신 이름(과 성별)만 최신
+// 값으로 갱신한다. 같은 엑셀 파일을 실수로 다시 올리거나(예: 이름이 안 보여서 재업로드해
+// 봤더니 또 하나 늘어나는 문제), 다음 학년도에 번호가 그대로인 학생 명단을 다시 올릴 때
+// 등, 학년·반·번호가 겹치는데도 매번 새 학생으로 중복 추가되는 것을 막기 위함이다.
+function mergeParsedStudents(existingStudents, parsedRows) {
+  const next = existingStudents.slice();
+  const added = [];
+  const updated = [];
+  parsedRows.forEach(row => {
+    const idx = next.findIndex(s => s.grade === row.grade && s.classNum === row.classNum && s.number === row.number);
+    if (idx >= 0) {
+      const prev = next[idx];
+      if (prev.name !== row.name || prev.gender !== row.gender) {
+        const merged = { ...prev, name: row.name, gender: row.gender };
+        next[idx] = merged;
+        updated.push(merged);
+      }
+    } else {
+      const created = { id: uid("stu"), ...row };
+      next.push(created);
+      added.push(created);
+    }
+  });
+  return { next, added, updated };
+}
+function describeBulkMergeResult(addedCount, updatedCount) {
+  if (addedCount > 0 && updatedCount > 0) return `${addedCount}명 추가, ${updatedCount}명 정보를 갱신했습니다(같은 학년·반·번호의 기존 학생으로 인식).`;
+  if (addedCount > 0) return `${addedCount}명을 일괄 추가했습니다.`;
+  if (updatedCount > 0) return `${updatedCount}명의 정보를 갱신했습니다(같은 학년·반·번호의 기존 학생으로 인식해 새로 추가하지 않았습니다).`;
+  return "변경 사항이 없습니다(이미 동일한 정보였습니다).";
 }
 
 function RosterManager({ students, setStudents, showToast, schoolGrades }) {
@@ -4640,6 +4846,15 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
   const [dragOver, setDragOver] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [lastBulkAddedIds, setLastBulkAddedIds] = useState(null);
+  // 엑셀 파일을 연달아 여러 번 드래그하면, 앞선 파일을 아직 읽는 중(비동기)일 때 뒤이은
+  // 드래그가 시작될 수 있다. 이때 각각의 처리 함수가 자신이 호출된 시점의(어쩌면 오래된)
+  // students prop만 보고 "기존 목록 + 이번에 추가된 명단"을 계산하면, 나중에 끝난 쪽이
+  // 앞서 추가된 학생들을 빼먹은 채로 덮어써 버릴 수 있다. 이를 막기 위해 매 렌더마다 최신
+  // students 값을 ref에 동기화해두고, 일괄 추가 시에는 이 ref를 기준으로 이어붙인 뒤 ref도
+  // 즉시 갱신해서 다음 호출이 항상 "지금까지 추가된 모든 학생"을 보게 한다.
+  const studentsRef = useRef(students);
+  studentsRef.current = students;
 
   function toggleSelect(id) {
     setSelected(prev => {
@@ -4695,20 +4910,35 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
     setStudents(students.filter(s => s.id !== id));
   }
 
+  function undoLastBulkAdd() {
+    if (!lastBulkAddedIds) return;
+    const idSet = new Set(lastBulkAddedIds);
+    const next = studentsRef.current.filter(s => !idSet.has(s.id));
+    setStudents(next);
+    studentsRef.current = next;
+    setLastBulkAddedIds(null);
+    showToast("방금 추가한 명단을 되돌렸습니다.", "ok");
+  }
+
   function bulkAdd() {
     const lines = bulkText.split("\n").map(l => l.trim()).filter(Boolean);
-    const added = [];
+    const parsed = [];
     lines.forEach(line => {
       const parts = line.split(/[,\t]+/).map(p => p.trim()).filter(Boolean);
       if (parts.length < 5) return;
       const [g, c, n, name, gender] = parts;
       const genderNorm = normalizeGender(gender);
-      added.push({ id: uid("stu"), grade: Number(g), classNum: Number(c), number: Number(n), name, gender: genderNorm });
+      parsed.push({ grade: Number(g), classNum: Number(c), number: Number(n), name, gender: genderNorm });
     });
-    if (added.length > 0) {
-      setStudents([...students, ...added]);
+    if (parsed.length > 0) {
+      // 학년+반+번호가 같은 기존 학생이 있으면 이름/성별만 갱신하고, 없을 때만 새로 추가한다
+      // (같은 명단을 실수로 두 번 붙여넣어도 중복 학생이 생기지 않게).
+      const { next, added, updated } = mergeParsedStudents(studentsRef.current, parsed);
+      setStudents(next);
+      studentsRef.current = next;
+      setLastBulkAddedIds(added.length > 0 ? added.map(s => s.id) : null);
       setBulkText("");
-      showToast(added.length + "명을 일괄 추가했습니다.", "ok");
+      showToast(describeBulkMergeResult(added.length, updated.length), "ok");
     } else {
       showToast("형식을 확인해 주세요. 예) 1,3,12,홍길동,남", "warn");
     }
@@ -4737,21 +4967,31 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
     const results = await Promise.all(files.map(readFileAsStudents));
-    const allAdded = results.flatMap(r => r.added);
+    const allParsed = results.flatMap(r => r.added);
     const problemFiles = results.filter(r => !r.ok || r.added.length === 0).map(r => r.name);
 
-    if (allAdded.length > 0) {
-      setStudents([...students, ...allAdded]);
+    let added = [], updated = [];
+    if (allParsed.length > 0) {
+      // 항상 studentsRef(최신 값)를 기준으로 병합한다 — 파일을 읽는 동안(await) 다른
+      // 드래그가 먼저 끝나 학생을 추가했을 수도 있으므로, 이 함수가 시작될 때 캡처했던
+      // students 클로저가 아니라 지금 가장 최신인 목록을 기준으로 삼는다. 학년+반+번호가
+      // 같은 기존 학생이 있으면 이름/성별만 갱신하고, 없을 때만 새로 추가한다 — 같은 엑셀
+      // 파일을 실수로(또는 이름이 안 보여서) 두 번 올려도 중복 학생이 생기지 않고, 오히려
+      // 그 재업로드로 누락된 이름을 다시 채워 넣을 수 있다.
+      const merged = mergeParsedStudents(studentsRef.current, allParsed);
+      added = merged.added;
+      updated = merged.updated;
+      setStudents(merged.next);
+      studentsRef.current = merged.next;
+      setLastBulkAddedIds(added.length > 0 ? added.map(s => s.id) : null);
     }
-    if (allAdded.length > 0 && problemFiles.length === 0) {
+    if (allParsed.length > 0 && problemFiles.length === 0) {
       showToast(
-        files.length > 1
-          ? `파일 ${files.length}개에서 총 ${allAdded.length}명을 불러왔습니다.`
-          : `${allAdded.length}명을 엑셀 파일에서 불러왔습니다.`,
+        (files.length > 1 ? `파일 ${files.length}개 — ` : "") + describeBulkMergeResult(added.length, updated.length),
         "ok"
       );
-    } else if (allAdded.length > 0 && problemFiles.length > 0) {
-      showToast(`${allAdded.length}명을 불러왔습니다. (인식 실패: ${problemFiles.join(", ")})`, "warn");
+    } else if (allParsed.length > 0 && problemFiles.length > 0) {
+      showToast(`${describeBulkMergeResult(added.length, updated.length)} (인식 실패: ${problemFiles.join(", ")})`, "warn");
     } else {
       showToast("엑셀 내용을 인식하지 못했습니다. 학년·반·번호·이름·성별 열을 확인해 주세요.", "warn");
     }
@@ -4784,6 +5024,14 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
       <div className="panel">
         <h3>엑셀 파일로 추가</h3>
         <div className="text-dim small-note">여러 학생을 한 번에 등록할 때(예: 새 학년도 전체 명단 등록) 활용하세요.</div>
+        <div className="info-banner">
+          <AlertTriangle size={16} />
+          <span>
+            <b>나이스 "학생명렬 내려받기"로 받은 엑셀 파일을 올려주세요.</b> 그래야 성별이 정확히 반영됩니다.
+            성별 열이 없거나 인식되지 않는 파일을 올리면 학생 전원이 자동으로 "여"로 등록되니,
+            올린 뒤에는 아래 명단에서 성별이 맞게 들어갔는지 꼭 확인해 주세요.
+          </span>
+        </div>
         <label
           htmlFor="roster-excel-file-input"
           className={"dropzone" + (dragOver ? " drag-over" : "")}
@@ -4804,6 +5052,12 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
           className="visually-hidden-input"
           onChange={handleExcelFile}
         />
+        {lastBulkAddedIds && (
+          <div className="bulk-undo-row">
+            <span className="text-dim small-note">방금 {lastBulkAddedIds.length}명을 추가했습니다.</span>
+            <button className="btn btn-ghost small" onClick={undoLastBulkAdd}><RotateCcw size={13} /> 되돌리기</button>
+          </div>
+        )}
 
         <div className="divider" />
 
@@ -4925,7 +5179,7 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
 // 나이스 등 학교 시스템 엑셀 양식에 기록을 채워 넣기 위한 열 인식 사전.
 // 더 구체적인 항목을 먼저 검사해야 헷갈리지 않는다(예: "왕복오래달리기"를 "오래달리기"보다 먼저 검사).
 const NEIS_FIELD_RULES = [
-  { field: "student_grade", label: "학년", test: h => /학년/.test(h) },
+  { field: "student_grade", label: "학년", test: h => /학년/.test(h) && !/학년도/.test(h) },
   { field: "student_class", label: "반", test: h => /반명|반코드|학급/.test(h) },
   { field: "student_number", label: "번호", test: h => /번호/.test(h) },
   { field: "student_name", label: "성명/이름", test: h => /성명|이름/.test(h) },
@@ -4940,20 +5194,12 @@ const NEIS_FIELD_RULES = [
   { field: "longjump", label: "제자리멀리뛰기", test: h => /제자리|멀리뛰기/.test(h) },
   { field: "fifty_m", label: "50m달리기", test: h => /50\s*m|50\s*미터/i.test(h) },
   { field: "bodyfat", label: "체지방률", test: h => /체지방/.test(h) },
+  // "BMI"/"체질량지수" 열엔 계산된 BMI 수치를, "신장"/"체중" 열엔 기록입력 화면에서
+  // 입력한 신장·체중 실측값을 각각 그대로 채운다(둘은 서로 다른 열).
+  { field: "bmi_value", label: "BMI", test: h => /BMI/i.test(h) || /체질량\s*지수/.test(h) },
   { field: "bmi_height", label: "신장", test: h => /신장|키\(/.test(h) || /^키$/.test(h) },
   { field: "bmi_weight", label: "체중", test: h => /체중|몸무게/.test(h) },
 ];
-const NEIS_FIELD_OPTIONS = [
-  { field: "", label: "(이 열은 무시)" },
-  { field: "student_grade", label: "학년" },
-  { field: "student_class", label: "반" },
-  { field: "student_number", label: "번호" },
-  { field: "student_name", label: "성명/이름" },
-  ...ALL_EVENTS.filter(e => e.id !== "bmi").map(e => ({ field: e.id, label: e.name })),
-  { field: "bmi_height", label: "신장" },
-  { field: "bmi_weight", label: "체중" },
-];
-
 function guessNeisField(header) {
   const h = String(header || "");
   const hasTrial2 = /2차/.test(h);
@@ -4975,6 +5221,7 @@ function neisFieldValue(student, field, records, activeYear) {
   if (field === "student_class") return v(student.classNum);
   if (field === "student_number") return v(student.number);
   if (field === "student_name") return student.name;
+  if (field === "bmi_value") return v(records[recKey(student.id, "bmi", activeYear)]?.value);
   if (field === "bmi_height") return v(records[recKey(student.id, "bmi", activeYear)]?.parts?.height);
   if (field === "bmi_weight") return v(records[recKey(student.id, "bmi", activeYear)]?.parts?.weight);
   if (field.startsWith("sitreach_")) return v(records[recKey(student.id, "sitreach", activeYear)]?.parts?.["trial" + field.slice(-1)]);
@@ -4988,15 +5235,19 @@ function neisFieldValue(student, field, records, activeYear) {
   return v(records[recKey(student.id, field, activeYear)]?.value);
 }
 
-function NeisTemplateFiller({ students, records, activeYear, showToast }) {
+function NeisTemplateFiller({ students, records, activeYear, showToast, fillState, setFillState }) {
   const fileInputRef = useRef(null);
-  const [fileName, setFileName] = useState("");
-  const [dragOver, setDragOver] = useState(false);
-  const [headerRow, setHeaderRow] = useState(null); // 원본 헤더 텍스트 배열
-  const [dataRows, setDataRows] = useState(null);   // 템플릿에 이미 있던 데이터 행(있다면)
-  const [mapping, setMapping] = useState([]);       // 열 인덱스별 매칭된 field
-  const [resultRows, setResultRows] = useState(null);
-  const [sheetName, setSheetName] = useState("Sheet1");
+  const [dragOver, setDragOver] = useState(false); // 드래그 중인지 여부는 탭을 오가며 유지할 필요가 없는 순간 UI 상태라 그대로 로컬로 둔다.
+  const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
+  // 첨부파일명·인식된 헤더·반영결과 등은 상위(PapsApp)에서 내려주는 fillState에 둬서,
+  // 데이터백업 탭을 벗어났다가 다시 돌아와도 사라지지 않는다.
+  const { fileName, headerRow, dataRows, mapping, resultRows, sheetName } = fillState;
+  const setFileName = v => setFillState(prev => ({ ...prev, fileName: v }));
+  const setHeaderRow = v => setFillState(prev => ({ ...prev, headerRow: v }));
+  const setDataRows = v => setFillState(prev => ({ ...prev, dataRows: v }));
+  const setMapping = v => setFillState(prev => ({ ...prev, mapping: v }));
+  const setResultRows = v => setFillState(prev => ({ ...prev, resultRows: v }));
+  const setSheetName = v => setFillState(prev => ({ ...prev, sheetName: v }));
 
   function processFile(file) {
     if (!file) return;
@@ -5032,11 +5283,6 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
     e.preventDefault();
     setDragOver(false);
     processFile(e.dataTransfer.files?.[0]);
-  }
-
-  function updateMapping(idx, field) {
-    setMapping(prev => prev.map((f, i) => (i === idx ? field : f)));
-    setResultRows(null);
   }
 
   function applyFill() {
@@ -5088,15 +5334,17 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     XLSX.writeFile(wb, (fileName.replace(/\.xlsx?$/i, "") || "나이스양식") + "_반영_" + dateStr + ".xlsx");
     showToast("파일을 다운로드했습니다.", "ok");
+    setShowDeleteReminder(true);
   }
 
   return (
     <div className="panel">
       <h3>학교 시스템(나이스) 양식에 직접 반영하기</h3>
       <div className="text-dim small-note">
-        나이스에서 받은 진짜 양식 파일을 여기에 첨부하면, 이 프로그램의 기록을 열 이름에 맞춰
-        자동으로 채워줍니다. <b>어떤 열이 무엇으로 인식됐는지 꼭 확인하고</b>, 필요하면 아래에서
-        직접 바꾼 뒤 반영해 주세요.
+        나이스에서 받은 진짜 양식 파일을 여기에 첨부한 뒤 "반영하기"를 누르면, 이 프로그램의
+        기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중" 열은 기록입력 화면에서
+        입력한 신장·체중 실측값이, "BMI" 열은 그 값으로 계산된 BMI 수치가 채워집니다.
+        <b> 실제로 제출하시기 전에 아래 미리보기에서 값이 정확히 채워졌는지 꼭 확인해 주세요.</b>
       </div>
 
       <input id="neis-template-input" ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="visually-hidden-input" onChange={handleFile} />
@@ -5115,16 +5363,6 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
       {headerRow && (
         <>
           <div className="divider" />
-          <div className="neis-map-list">
-            {headerRow.map((h, idx) => (
-              <div className="neis-map-row" key={idx}>
-                <span className="neis-map-header">{h || "(빈 열)"}</span>
-                <select className="select" value={mapping[idx] || ""} onChange={e => updateMapping(idx, e.target.value)}>
-                  {NEIS_FIELD_OPTIONS.map(o => <option key={o.field} value={o.field}>{o.label}</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
           <button className="btn btn-primary" onClick={applyFill}><Check size={14} /> 반영하기</button>
 
           {resultRows && (
@@ -5148,14 +5386,45 @@ function NeisTemplateFiller({ students, records, activeYear, showToast }) {
           )}
         </>
       )}
+      {showDeleteReminder && <DownloadDeleteReminderModal onClose={() => setShowDeleteReminder(false)} />}
     </div>
   );
 }
 
-function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName }) {
+// 학생 개인정보(이름·기록 등)가 담긴 파일을 방금 내려받은 직후 한 번 보여주는 파기 안내.
+// 나이스 반영, 백업(JSON), 마감 전 백업 세 곳에서 공통으로 쓴다. 앱 내부 데이터는 "마감"으로
+// 지울 수 있어도, 한 번 내려받아 교사 PC 다운로드 폴더에 남은 파일은 이 프로그램이 지울 수
+// 없어 별도의 유출 통로가 될 수 있기 때문에, 다운로드 시점마다 삭제를 상기시킨다.
+function DownloadDeleteReminderModal({ onClose }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><ShieldCheck size={18} /> 다운로드한 파일 삭제 안내</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="text-dim small-note">
+            방금 내려받은 파일에는 학생 이름 등 개인정보가 들어 있습니다. 나이스 등록(또는
+            필요한 처리)을 마쳤다면, 컴퓨터에 남겨두지 말고 <b>다운로드 폴더에서 바로
+            삭제(가능하면 휴지통을 거치지 않는 Shift+Delete로 완전 삭제)</b>해 주세요. 특히
+            여러 사람이 함께 쓰는 컴퓨터라면 다운로드 폴더에 방치된 파일이 개인정보 유출
+            통로가 될 수 있습니다.
+          </div>
+          <div className="confirm-actions">
+            <button className="btn btn-primary" onClick={onClose}>확인</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName, isFounder, neisFillState, setNeisFillState }) {
   const [pendingImport, setPendingImport] = useState(null);
   const importInputRef = useRef(null);
   const [backupLog, setBackupLog] = useState(null);
+  const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
 
   useEffect(() => {
     loadBackupLog(workspaceCode).then(list => setBackupLog(list.slice().reverse()));
@@ -5177,28 +5446,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
     const entry = { ts: Date.now(), by: myDisplayName };
     appendBackupLog(workspaceCode, entry);
     setBackupLog(prev => [entry, ...(prev || [])]);
-  }
-
-  // 외부 공유용(익명화) 내보내기: 학생 실명 대신 "[1학년 1반 2번]" 형태의 표시용 라벨만
-  // 담아, 이 파일만으로는 어떤 학생인지 알 수 없게 만든다. 교육청 제출·통계 공유 등
-  // 실명이 필요 없는 용도로 파일을 넘길 때 사용한다.
-  function exportAnonymizedBackup() {
-    const anonStudents = students.map(s => ({
-      id: s.id, grade: s.grade, classNum: s.classNum, number: s.number, gender: s.gender,
-      label: `${s.grade}학년 ${s.classNum}반 ${s.number}번`,
-    }));
-    const payload = { exportedAt: Date.now(), anonymized: true, students: anonStudents, criteria, settings, records };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const dateStr = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = "paps-backup-익명화-" + (settings.schoolName || "data") + "-" + dateStr + ".json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast("익명화된 백업 파일을 다운로드했습니다. (이 파일은 다시 불러오기에는 쓸 수 없어요)", "ok");
+    setShowDeleteReminder(true);
   }
 
   function handleImportFile(e) {
@@ -5238,6 +5486,13 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 
       <div className="panel">
         <h3>백업 파일(JSON)</h3>
+        {!isFounder ? (
+          <div className="text-dim small-note">
+            JSON 백업(내보내기·불러오기)은 개설자만 할 수 있습니다. 여러 명이 각자 따로
+            백업하고 불러오면 서로 다른 시점의 기록이 뒤섞여 최신 데이터가 덮어써질 수
+            있어서, 혼선을 막기 위해 개설자 한 명으로만 창구를 좁혀두었습니다.
+          </div>
+        ) : (
         <div className="backup-steps">
           <div className="backup-step">
             <span className="backup-step-num">1</span>
@@ -5245,8 +5500,6 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
               <div className="backup-step-title">저장하기</div>
               <div className="text-dim small-note">아래 버튼을 누르면 파일이 저장됩니다.</div>
               <button className="btn btn-secondary" onClick={exportBackup}><Copy size={14} /> JSON으로 내보내기 (교사 보관용, 실명 포함)</button>
-              {" "}
-              <button className="btn btn-ghost" onClick={exportAnonymizedBackup}><Download size={14} /> 익명화해서 내보내기 (외부 공유용)</button>
               {backupLog && (
                 backupLog.length === 0 ? (
                   <div className="text-dim small-note backup-log-empty">아직 내보낸 기록이 없습니다.</div>
@@ -5278,15 +5531,20 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
             </div>
           </div>
         </div>
+        )}
+        {isFounder && (
         <div className="warn-note">
           <AlertTriangle size={16} />
-          <span>"교사 보관용" 파일은 학생 이름·기록이 그대로 담겨 있으니 개인 기기 등 안전한 곳에만 보관하고 다 쓴 옛 파일은 삭제해 주세요. "외부 공유용(익명화)" 파일은 이름 대신 "1학년 1반 2번"처럼 학급·번호만 담기며, 다시 불러오기에는 쓸 수 없습니다.</span>
+          <span>학생 이름·기록이 담긴 파일입니다. 개인 기기 등 안전한 곳에만 보관하고, 다 쓴 옛 파일은 삭제해 주세요.</span>
         </div>
+        )}
       </div>
 
-      <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} />
+      <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} fillState={neisFillState} setFillState={setNeisFillState} />
 
-      {pendingImport && (
+      {showDeleteReminder && <DownloadDeleteReminderModal onClose={() => setShowDeleteReminder(false)} />}
+
+      {pendingImport && isFounder && (
         <ConfirmModal
           title="백업 파일 불러오기"
           message={`이 파일로 불러오면 현재 학생 ${students.length}명의 데이터가 백업 파일 속 학생 ${pendingImport.students.length}명 데이터로 완전히 대체됩니다. 계속할까요?`}
@@ -5302,12 +5560,53 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 
 /* ============================== 학기 마감 ============================== */
 
-function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode }) {
+// 파일명에 다운로드 시점(날짜+시각)이 바로 보이도록 "YYYYMMDD_HHmm" 형태로 만든다. 같은 날
+// 여러 번 백업을 받아도 파일명만 보고 어느 게 최신인지 구분할 수 있게 하기 위함.
+function fileTimestamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+}
+
+// 마감 전, JSON 백업과는 별도로 "혹시 나중에 필요할 수도 있는" 나이스 제출양식 형태의 엑셀로
+// 전체 구성원의 모든 종목 기록을 내려받을 수 있게 한다. 특정 학교의 실제 나이스 업로드
+// 양식(열 구성)은 학교/연도마다 다를 수 있어 그 양식에 정확히 맞추기보다는, 나이스가 흔히
+// 요구하는 열 이름(guessNeisField가 인식하는 헤더와 같은 표기)으로 모든 종목의 세부 측정값을
+// 빠짐없이 한 장에 담는 것을 목표로 한다.
+const CLOSEOUT_NEIS_EXPORT_COLUMNS = [
+  { header: "학년", field: "student_grade" },
+  { header: "반", field: "student_class" },
+  { header: "번호", field: "student_number" },
+  { header: "성명", field: "student_name" },
+  { header: "왕복오래달리기(회)", field: "shuttlerun" },
+  { header: "오래달리기-걷기(초)", field: "run_walk" },
+  { header: "스텝검사(PEI)", field: "step_test" },
+  { header: "윗몸말아올리기(회)", field: "situp" },
+  { header: "팔굽혀펴기(회)", field: "pushup" },
+  { header: "앉아윗몸앞으로굽히기 1차(cm)", field: "sitreach_1" },
+  { header: "앉아윗몸앞으로굽히기 2차(cm)", field: "sitreach_2" },
+  { header: "종합유연성(점)", field: "flex_total" },
+  { header: "제자리멀리뛰기 1차(cm)", field: "longjump_1" },
+  { header: "제자리멀리뛰기 2차(cm)", field: "longjump_2" },
+  { header: "50m달리기(초)", field: "fifty_m" },
+  { header: "악력 1차 왼쪽(kg)", field: "gripstrength_1_left" },
+  { header: "악력 1차 오른쪽(kg)", field: "gripstrength_1_right" },
+  { header: "악력 2차 왼쪽(kg)", field: "gripstrength_2_left" },
+  { header: "악력 2차 오른쪽(kg)", field: "gripstrength_2_right" },
+  { header: "신장(cm)", field: "bmi_height" },
+  { header: "체중(kg)", field: "bmi_weight" },
+  { header: "BMI", field: "bmi_value" },
+  { header: "체지방률(%)", field: "bodyfat" },
+];
+
+function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode, activeYear }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [backedUp, setBackedUp] = useState(false);
+  const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
 
   const recordCount = Object.keys(records || {}).length;
   const studentCount = students.length;
+  const isEmpty = studentCount === 0 && recordCount === 0;
 
   function downloadBackupNow() {
     const payload = { exportedAt: Date.now(), students, criteria, settings, records };
@@ -5322,10 +5621,26 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
     a.remove();
     URL.revokeObjectURL(url);
     setBackedUp(true);
+    setShowDeleteReminder(true);
+  }
+
+  // 위 JSON 백업(프로그램이 스스로 복원하는 용도)과 별개로, 사람이 열어보거나 나이스에 참고할
+  // 수 있는 엑셀 형태 전체 백업. 마감 필수 조건(backedUp)에는 영향을 주지 않는 선택 사항이다.
+  function downloadNeisFullExcelNow() {
+    const sorted = [...students].sort((a, b) => a.grade - b.grade || a.classNum - b.classNum || a.number - b.number);
+    const header = CLOSEOUT_NEIS_EXPORT_COLUMNS.map(c => c.header);
+    const rows = sorted.map(s => CLOSEOUT_NEIS_EXPORT_COLUMNS.map(c => neisFieldValue(s, c.field, records, activeYear)));
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    ws["!cols"] = header.map(() => ({ wch: 14 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "전체기록");
+    XLSX.writeFile(wb, (settings.schoolName || "학교") + "_나이스제출양식_전체기록_" + fileTimestamp() + ".xlsx");
+    setShowDeleteReminder(true);
   }
 
   return (
     <div>
+      {showDeleteReminder && <DownloadDeleteReminderModal onClose={() => setShowDeleteReminder(false)} />}
       <div className="panel closeout-hero">
         <Trash2 size={36} color="#E85D5D" />
         <h2 className="closeout-title">마감</h2>
@@ -5344,26 +5659,43 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
         </ul>
 
         <div className="closeout-backup-step">
-          <div className="backup-step-title">① 백업 파일부터 받으세요 (필수)</div>
-          <div className="text-dim small-note">
-            아래 버튼으로 지금 상태를 백업해두지 않으면 "마감하기" 버튼이 눌리지 않습니다.
-            만약을 대비한 최소한의 안전장치입니다.
-          </div>
-          <button className="btn btn-secondary" onClick={downloadBackupNow}>
-            <Copy size={14} /> {backedUp ? "백업 파일 다시 받기" : "지금 백업 파일 받기"}
-          </button>
-          {backedUp && <div className="closeout-backup-done"><CheckCircle2 size={14} /> 백업을 받았습니다. 이제 마감할 수 있습니다.</div>}
+          {isEmpty ? (
+            <div className="text-dim small-note">
+              현재 학생 명단과 기록이 없어서, 백업 없이 바로 마감할 수 있습니다.
+            </div>
+          ) : (
+            <>
+              <div className="backup-step-title">① 백업 파일부터 받으세요 (필수)</div>
+              <div className="text-dim small-note">
+                아래 버튼으로 지금 상태를 백업해두지 않으면 "마감하기" 버튼이 눌리지 않습니다.
+                만약을 대비한 최소한의 안전장치입니다.
+              </div>
+              <button className="btn btn-secondary" onClick={downloadBackupNow}>
+                <Copy size={14} /> {backedUp ? "백업 파일 다시 받기" : "지금 백업 파일 받기"}
+              </button>
+              {backedUp && <div className="closeout-backup-done"><CheckCircle2 size={14} /> 백업을 받았습니다. 이제 마감할 수 있습니다.</div>}
+
+              <div className="text-dim small-note closeout-neis-export-hint">
+                (선택) 위 백업과는 별도로, 전체 학생의 모든 측정 기록을 나이스 제출양식과 비슷한
+                형태의 엑셀 파일로도 받아둘 수 있습니다. 마감에 필수는 아니며, 나중에 참고가
+                필요할 때를 대비한 것입니다.
+              </div>
+              <button className="btn btn-ghost" onClick={downloadNeisFullExcelNow}>
+                <FileSpreadsheet size={14} /> 나이스 제출양식 엑셀로 전체 기록 받기
+              </button>
+            </>
+          )}
         </div>
 
         <div className="closeout-summary">
           현재 <b>학생 {studentCount}명</b>, <b>기록 {recordCount}건</b>이 저장되어 있습니다.
           마감하면 <b>학생 명단과 기록이 모두 삭제</b>됩니다.
         </div>
-        <div className="closeout-step-title">② 마감하기</div>
-        <button className="btn btn-primary closeout-btn" onClick={() => setConfirmOpen(true)} disabled={!backedUp}>
+        <div className="closeout-step-title">{isEmpty ? "마감하기" : "② 마감하기"}</div>
+        <button className="btn btn-primary closeout-btn" onClick={() => setConfirmOpen(true)} disabled={!isEmpty && !backedUp}>
           <Trash2 size={16} /> 마감하기
         </button>
-        {!backedUp && <div className="text-dim small-note">먼저 위에서 백업 파일을 받아야 눌러집니다.</div>}
+        {!isEmpty && !backedUp && <div className="text-dim small-note">먼저 위에서 백업 파일을 받아야 눌러집니다.</div>}
 
         <div className="closeout-footer">
           <p className="closeout-footer-text">
@@ -6058,6 +6390,7 @@ function PapsStyles({ children }) {
         .icon-btn { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 6px; }
         .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
         .icon-btn.danger:hover { color: var(--track-red); }
+        .bmi-bulk-toggle-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
 
         .paps-body { padding: 20px; }
         .presentation .paps-body { padding: 24px 32px; }
@@ -6244,6 +6577,7 @@ function PapsStyles({ children }) {
         .closeout-btn { background: #E85D5D !important; border-color: #E85D5D !important; font-size: 15px; padding: 14px 20px; width: 100%; justify-content: center; }
         .closeout-backup-step { background: rgba(255,201,60,0.08); border: 1px solid rgba(255,201,60,0.3); border-radius: 10px; padding: 14px; margin: 14px 0; }
         .closeout-backup-done { display: flex; align-items: center; gap: 6px; color: #7FD98A; font-size: 13px; margin-top: 8px; font-weight: 600; }
+        .closeout-neis-export-hint { margin-top: 14px; }
         .closeout-step-title { font-weight: 700; font-size: 14px; margin: 16px 0 8px; }
         .closeout-footer { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; }
         .closeout-footer-text { font-size: 12px; color: var(--text-dim); line-height: 1.7; margin: 0; }
@@ -6275,6 +6609,7 @@ function PapsStyles({ children }) {
         .danger-btn:hover:not(:disabled) { color: var(--track-red); border-color: var(--track-red); }
         .chip.small { padding: 4px 9px; font-size: 11px; }
 
+        .bulk-undo-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
         .dropzone {
           border: 2px dashed var(--line); border-radius: 12px; padding: 22px 14px; text-align: center;
           cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -6326,10 +6661,6 @@ function PapsStyles({ children }) {
         .grade-table .grade-dot.small { width: 24px; height: 24px; font-size: 13px; }
         .table-foot { margin-top: 10px; font-size: 11px; }
 
-        .pass-badge { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; }
-        .pass-badge.pass { background: rgba(127,217,138,0.15); color: #7FD98A; }
-        .pass-badge.fail { background: rgba(232,93,93,0.15); color: #E85D5D; }
-        .pass-badge.pending { background: rgba(255,255,255,0.06); color: var(--text-dim); }
 
         .band-table { margin-bottom: 14px; }
         .band-head-row, .band-row { display: grid; grid-template-columns: 50px 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
@@ -6451,6 +6782,7 @@ function PapsStyles({ children }) {
           border: 1px solid rgba(255,201,60,0.3);
         }
         .bmi-ref-tag { font-size: 11px; color: var(--text-dim); white-space: nowrap; text-align: right; }
+        .bmi-direct-toggle { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
         @media (max-width: 760px) {
           .drill-student-row.two-trial, .drill-student-row.grip-row, .drill-student-row.bmi-row, .drill-student-row.bodyfat-row {
             grid-template-columns: 1fr 1fr; row-gap: 6px;
@@ -6479,6 +6811,9 @@ function PapsStyles({ children }) {
         }
         .drill-student-name { font-size: 13px; font-weight: 600; }
         .drill-student-input { text-align: center; font-family: 'Oswald', sans-serif; padding: 6px 8px; }
+        .drill-panel-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+        .drill-panel-head h3 { margin: 0; }
+        .mask-toggle-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 
         /* 종목 선택 칩 + 생략 체크 */
         .event-chip { display: flex; align-items: center; gap: 8px; }
@@ -6611,6 +6946,8 @@ function PapsStyles({ children }) {
           position: fixed; inset: 0; background: rgba(5,8,20,0.72); z-index: 100;
           display: flex; align-items: center; justify-content: center; padding: 20px;
         }
+        .idle-lock-backdrop { background: rgba(5,8,20,0.97); z-index: 200; }
+        .mask-toggle-btn.active { background: var(--track-red); border-color: var(--track-red); color: #fff; }
         .modal-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 20px; }
         .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
         .modal-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: 'Oswald', sans-serif; font-size: 17px; }
@@ -6654,13 +6991,7 @@ function PapsStyles({ children }) {
           background: rgba(255,255,255,0.05); border: 1px dashed var(--line); border-radius: 8px;
           padding: 10px 12px; font-size: 13px; color: var(--text); line-height: 1.6;
         }
-        .neis-map-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; max-height: 360px; overflow-y: auto; padding-right: 4px; }
-        .neis-map-row { display: grid; grid-template-columns: 1fr 180px; gap: 10px; align-items: center; padding: 6px 0; }
-        .neis-map-header { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .neis-preview-wrap { margin: 12px 0; }
-        @media (max-width: 600px) {
-          .neis-map-row { grid-template-columns: 1fr; }
-        }
 
         /* ================= 챔피언십 모드(테마) ================= */
         .theme-toggle-btn.on { color: var(--gold); border-color: var(--gold); }
