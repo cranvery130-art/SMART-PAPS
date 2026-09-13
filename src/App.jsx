@@ -602,6 +602,18 @@ async function saveWorkspaceCodeRemote(code) {
     return false;
   }
 }
+// 마감(학교 코드 완전 삭제) 시, 이 기기가 "마지막으로 쓰던 코드"로 기억해 둔 값도 함께
+// 지운다. 이걸 지우지 않으면, 마감 직후에는 첫 화면으로 잘 돌아가더라도 앱을 나갔다가
+// 다시 열 때(특히 모바일에서 브라우저/PWA를 새로 열 때) 이 기기가 방금 지운 코드를
+// 자동으로 다시 불러와 그 코드로 재접속을 시도하게 된다.
+async function clearSavedWorkspaceCode() {
+  try {
+    await storage.delete(WORKSPACE_CODE_KEY, false);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
 // ---- 접근 요청(열람 신청) 관련 저장소 ----
 // 열람 신청자는 관리자에게 안내받은 "학교 코드"와 "열람 비밀번호"를 직접
@@ -661,6 +673,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const pendingSchoolLevelRef = useRef("middle"); // 새 코드를 만들 때 고른 학교급(기존 코드면 무시됨)
   const pendingViewerPasswordRef = useRef(""); // 새 코드를 만들 때 함께 정한 접근 신청 비밀번호
   const pendingFounderPasswordRef = useRef(""); // 새 코드를 만들 때 정한(또는 기존 코드 재접속 시 입력한) 개설자 전용 비밀번호
+  // 방금 제출된 코드가 "새 코드 만들기"로 들어온 건지("create"), "코드로 로그인"으로
+  // 들어온 건지("login")를 기억해 둔다. 아직 아무도 만든 적 없는(또는 마감으로 방금
+  // 삭제된) 코드일 때, "새 코드 만들기"로 들어온 경우에만 지금 이 사람을 새 개설자로
+  // 만들고, "코드로 로그인"으로 들어왔거나(사람이 직접 입력하지 않고) 이 기기가 예전에
+  // 기억해 둔 코드를 자동으로 다시 불러온 경우에는 절대 새로 만들지 않는다 — 이걸 구분하지
+  // 않으면, 마감으로 지워진 코드를 다시 열었을 때(특히 이 기기가 예전 코드를 기억하고
+  // 있다가 자동으로 재접속을 시도할 때) 마치 아무 일도 없었다는 듯 새 빈 코드가 조용히
+  // 다시 만들어지는 문제가 있었다.
+  const pendingIntentRef = useRef("login");
   const [workspaceChecking, setWorkspaceChecking] = useState(true);
   const [role, setRole] = useState(null); // 'admin' | 'viewer' | 'pending' | 'blocked'
   const [isFounder, setIsFounder] = useState(false);
@@ -791,13 +812,19 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     })();
   }, []);
 
-  function submitWorkspaceCode(raw, schoolLevel, viewerPassword, founderPassword) {
+  function submitWorkspaceCode(raw, schoolLevel, viewerPassword, founderPassword, intent) {
     const code = sanitizeWorkspaceCode(raw);
     if (!code) return;
     pendingSchoolLevelRef.current = schoolLevel || "middle";
     pendingViewerPasswordRef.current = (viewerPassword || "").trim();
     pendingFounderPasswordRef.current = (founderPassword || "").trim();
-    saveWorkspaceCodeRemote(code);
+    pendingIntentRef.current = intent === "create" ? "create" : "login";
+    // 여기서는 아직 "마지막으로 쓴 코드"로 저장하지 않는다. 실제로 개설자·조회자·수정권한자로
+    // 확인되기 전에 미리 저장해 버리면, 예를 들어 이미 다른 선생님이 만든 코드인 줄 모르고
+    // 입력해 "접근 신청이 필요합니다" 화면을 만난 뒤 앱을 껐다가 다시 켰을 때, 실제로는 아직
+    // 아무 권한도 없는데 그 코드가 자동으로 다시 불러와져서 곧바로 같은 안내 화면으로 돌아가
+    // 버리는 문제가 있었다. 저장은 아래 접근 권한 확인 로직에서 실제로 admin/viewer 권한이
+    // 확정된 시점에만 한다.
     setWorkspaceCode(code);
   }
 
@@ -817,6 +844,44 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       if (cancelled) return;
       if (device) setMyDeviceId(device.id);
 
+      // 이 코드가 실제로 아직 존재하는지 먼저 확인한다. 마감으로 방금 삭제된 코드처럼, 이
+      // 기기에 예전 역할이 캐시되어 있거나(예전에 개설자·조회자·수정권한자였던 기기) 이
+      // 기기가 예전에 쓰던 코드를 자동으로 다시 불러온 경우, 설정(cfg)이 이미 사라졌다면
+      // 그 캐시된 역할을 그대로 믿어서는 안 된다. 이걸 확인하지 않으면, 마감으로 지워진
+      // 코드를 다시 열었을 때(특히 모바일에서 앱을 나갔다가 다시 열어 이 기기가 예전 코드를
+      // 자동으로 재접속 시도할 때) 아무 확인 절차 없이 조용히 새 빈 코드가 다시 만들어지거나
+      // (개설자였던 기기) 예전 권한이 유령처럼 되살아나 버리는(조회자·수정권한자였던 기기)
+      // 문제가 있었다.
+      const cfg = await loadConfig(workspaceCode);
+      if (cancelled) return;
+
+      if (!cfg) {
+        if (!device && pendingIntentRef.current === "create") {
+          // "새 코드 만들기"로 직접 제출한 경우에만, 지금 이 사람을 새 개설자로 만든다.
+          const newId = uid("dev");
+          await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
+          await saveWorkspaceCodeRemote(workspaceCode);
+          setMyDeviceId(newId);
+          setIsFounder(true);
+          setMyDisplayName("개설자");
+          setRole("admin");
+          setRoleChecking(false);
+          return;
+        }
+        // 그 외의 경우(존재하지 않는 코드로 "코드로 로그인"을 시도했거나, 이 기기가 예전에
+        // 쓰던 코드를 자동으로 다시 불러왔거나, 이 기기가 예전에 이 코드로 뭔가 권한을
+        // 가졌었지만 지금은 코드 자체가 없는 경우)에는 조용히 새로 만들지 않는다. 이 기기에
+        // 남은 캐시(역할·마지막으로 쓰던 코드로 기억해 둔 값)를 정리해, 다음에 또 자동으로
+        // 이 코드를 불러오는 일이 없게 한다.
+        if (device) await clearDeviceRole(workspaceCode);
+        await clearSavedWorkspaceCode();
+        if (cancelled) return;
+        setRole("blocked");
+        setBlockReason("no-such-code");
+        setRoleChecking(false);
+        return;
+      }
+
       if (device && device.role === "admin") {
         // 이 기기가 "최초 개설자"인지 "승인받은 수정 권한자"인지 구분한다. 접근권한 목록에
         // 내 항목이 있으면(=신청해서 승인받은 사람) 개설자가 아니라 제한된 관리자다.
@@ -825,6 +890,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setIsFounder(!mine);
         setMyDisplayName(mine ? mine.name : "개설자");
         setAccessList(list);
+        await saveWorkspaceCodeRemote(workspaceCode);
         setRole("admin");
         setRoleChecking(false);
         return;
@@ -836,11 +902,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         if (mine && mine.status === "approved") {
           const grantedRole = mine.type === "editor" ? "admin" : "viewer";
           await saveDeviceRole(workspaceCode, { id: device.id, role: grantedRole });
+          await saveWorkspaceCodeRemote(workspaceCode);
           setIsFounder(false);
           setMyDisplayName(mine.name);
           setRole(grantedRole);
           setAccessList(list);
         } else if (mine && mine.status === "denied") {
+          // 승인 대기·거절 안내 화면은 "접속된 상태"가 아니므로, 여기서 나갔다가 다시
+          // 들어오면 곧바로 이 화면으로 되돌아가지 않고 처음 화면부터 시작하게 한다.
+          await clearSavedWorkspaceCode();
           setRole("blocked");
           setBlockReason("denied");
         } else if (mine && mine.status === "pending") {
@@ -849,6 +919,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         } else {
           // 요청 기록을 찾을 수 없음(관리자가 삭제 등) — 취소된 것으로 처리
           await clearDeviceRole(workspaceCode);
+          await clearSavedWorkspaceCode();
           setRole("blocked");
           setBlockReason("revoked");
         }
@@ -856,27 +927,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         return;
       }
 
-      // 이 기기(계정)에 저장된 역할이 없는 경우.
-      const cfg = await loadConfig(workspaceCode);
-      if (!cfg) {
-        // 아직 아무도 만든 적 없는 새 코드 → 지금 만드는 사람이 최초 개설자(관리자)가 된다.
-        const newId = uid("dev");
-        await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
-        setMyDeviceId(newId);
-        setIsFounder(true);
-        setMyDisplayName("개설자");
-        setRole("admin");
-        setRoleChecking(false);
-        return;
-      }
-
-      // 이미 개설된 코드에 코드만 입력해 들어온 경우. 단, 이번에 함께 입력한 값이 "개설자
-      // 전용 비밀번호"와 정확히 일치하면(개설자 본인이 다른 기기로 넘어온 경우), 별도
-      // 승인 절차 없이 곧바로 개설자로 인정한다. 그 외에는 "접근 신청" 절차를 거쳐야 한다.
+      // 이 기기(계정)에 저장된 역할은 없지만, 코드 자체는 이미 존재하는 경우(위에서 cfg
+      // 확인으로 "존재하지 않는 코드"는 이미 걸러졌다). 단, 이번에 함께 입력한 값이
+      // "개설자 전용 비밀번호"와 정확히 일치하면(개설자 본인이 다른 기기로 넘어온 경우),
+      // 별도 승인 절차 없이 곧바로 개설자로 인정한다. 그 외에는 "접근 신청" 절차를 거쳐야 한다.
       const founderPw = cfg.settings?.founderPassword;
       if (founderPw && pendingFounderPasswordRef.current && pendingFounderPasswordRef.current === founderPw) {
         const newId = uid("dev");
         await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
+        await saveWorkspaceCodeRemote(workspaceCode);
         setMyDeviceId(newId);
         setIsFounder(true);
         setMyDisplayName("개설자");
@@ -885,6 +944,11 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         return;
       }
 
+      // 아직 아무 권한도 없이 "이미 있는 코드"를 만난 경우(접근 신청이 필요한 상태)다.
+      // 실제로 접근 신청을 마치기 전까지는 이 코드를 "마지막으로 쓴 코드"로 남겨두지 않는다.
+      // 그래야 이 안내 화면을 보고 나갔다가 다시 들어와도 곧장 같은 화면으로 되돌아가지 않고
+      // 처음 화면부터 다시 시작한다.
+      await clearSavedWorkspaceCode();
       setRole("blocked");
       setBlockReason("need-request");
       setRoleChecking(false);
@@ -1354,6 +1418,10 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
     await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
     await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+    // 이 기기가 "마지막으로 쓰던 코드"로 기억해 둔 값도 지운다. 그렇지 않으면 마감 직후
+    // 화면은 첫 화면으로 돌아가더라도, 앱을 나갔다가 다시 열 때(특히 모바일) 이 기기가
+    // 방금 지운 코드를 자동으로 다시 불러와 재접속을 시도하는 문제가 있었다.
+    await clearSavedWorkspaceCode().catch(() => {});
     // 이 기기에 남아있던 학생 이름표(익명화를 위해 로컬에만 저장해뒀던 실명 매핑)도 함께
     // 지운다 — 서버 데이터가 사라진 뒤에도 이 브라우저에만 실명이 남아있지 않도록 한다.
     try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
@@ -1724,6 +1792,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               settings={settings}
               onCloseout={performSemesterCloseout}
               workspaceCode={workspaceCode}
+              activeYear={activeYear}
             />
           )}
           {view === "access" && role === "admin" && (
@@ -1766,6 +1835,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   const [showInitialPassword, setShowInitialPassword] = useState(false);
   const [founderPassword, setFounderPassword] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [createNotesOpen, setCreateNotesOpen] = useState(false); // "새 코드 만들기" 화면의 설명문을 접어두는 토글
   const [showFounderPassword, setShowFounderPassword] = useState(false);
   const [agree, setAgree] = useState(false);
   const [name, setName] = useState("");
@@ -1799,7 +1869,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
 
   function submitCode() {
     if (!value.trim()) return;
-    onSubmit(value, schoolLevel, initialPassword, founderPassword);
+    onSubmit(value, schoolLevel, initialPassword, founderPassword, createOpen ? "create" : "login");
   }
 
   if (mode === "code") {
@@ -1820,20 +1890,129 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           </button>
           <div className="gate-divider" />
 
-          <h2>코드로 로그인</h2>
-          <p className="gate-desc">
-            이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
-            바로 들어갈 수 있습니다.
-          </p>
-          <input
-            className="input big-input gate-input"
-            placeholder="예: 낭만체육123"
-            value={value}
-            onChange={e => setValue(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && value.trim() && !createOpen) submitCode(); }}
-          />
+          {/* "새 코드 만들기"를 제목 바로 아래(첫 화면에서 가장 먼저 보이는 위치)로 옮겨
+              처음 오는 선생님이 로그인 화면을 지나칠 필요 없이 바로 시작할 수 있게 한다. */}
           {!createOpen && (
             <>
+              <button className="btn btn-secondary big-btn gate-create-emphasis" onClick={() => setCreateOpen(true)}>
+                <Plus size={15} /> 처음이신가요? 새 코드 만들기
+              </button>
+              <div className="gate-divider" />
+            </>
+          )}
+
+          {createOpen && (
+            <>
+              <h2>새 코드 만들기</h2>
+              <p className="gate-desc">
+                우리 학교만의 코드를 새로 만드세요. 학교 이름이 들어가지 않은 코드를 추천합니다.
+              </p>
+              <input
+                className="input big-input gate-input"
+                placeholder="새로 만들 코드 이름, 예: 낭만체육123"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+              />
+              <div className="gate-pw-row">
+                <label>개설자 전용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showFounderPassword ? "text" : "password"}
+                    value={founderPassword}
+                    onChange={e => setFounderPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 원장선생님0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
+                </div>
+              </div>
+              <div className="gate-pw-row">
+                <label>안내용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showInitialPassword ? "text" : "password"}
+                    value={initialPassword}
+                    onChange={e => setInitialPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 체육0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowInitialPassword(v => !v)}>{showInitialPassword ? "숨기기" : "보기"}</button>
+                </div>
+              </div>
+              <div className="gate-level-row">
+                <label>학교급</label>
+                <div className="chip-row gate-level-chips">
+                  {SCHOOL_LEVELS.map(l => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      className={"chip" + (schoolLevel === l.id ? " active" : "")}
+                      onClick={() => setSchoolLevel(l.id)}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button className="btn btn-primary big-btn" disabled={!value.trim()} onClick={submitCode}>
+                만들기
+              </button>
+
+              {/* 화면이 복잡해 보이지 않도록, 꼭 필요할 때만 펼쳐보는 참고사항으로 설명문을
+                  모아둔다(코드 이름 주의사항, 두 비밀번호의 차이, 기존 코드 재사용 안내). */}
+              <button type="button" className="gate-link-btn gate-notes-toggle" onClick={() => setCreateNotesOpen(v => !v)}>
+                <Info size={13} /> 참고사항 {createNotesOpen ? "접기 ▲" : "보기 ▼"}
+              </button>
+              {createNotesOpen && (
+                <div className="gate-notes-panel">
+                  <div className="text-dim small-note gate-code-warn">
+                    <b>코드 이름:</b> 학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와
+                    학교 이름이 함께 알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼
+                    학교와 무관한 이름을 추천합니다.
+                  </div>
+                  <div className="text-dim small-note gate-pw-hint">
+                    <b>개설자 전용 비밀번호:</b> 선생님(개설자) 본인만 알아야 하는 비밀번호입니다.
+                    나중에 다른 기기(휴대폰↔컴퓨터 등)에서 같은 코드와 이 비밀번호를 "코드로 로그인"
+                    화면에 입력하면, 승인 절차 없이 곧바로 개설자로 다시 들어올 수 있어요. 아래
+                    "안내용 비밀번호"와는 다른 값으로 정해주세요(동료 교사에게는 절대 알려주지 마세요).
+                  </div>
+                  <div className="text-dim small-note gate-pw-hint">
+                    <b>안내용 비밀번호:</b> 동료 교사에게 안내해 접근 신청 시 입력하게 할
+                    비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
+                    연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로
+                    정해주세요.
+                  </div>
+                  <div className="text-dim small-note">
+                    <Info size={13} /> 이미 등록되어 있는 학교코드라면, 개설자 전용 비밀번호가
+                    맞을 때만 개설자로 들어가지고, 그 외에는 반영되지 않습니다.
+                  </div>
+                </div>
+              )}
+
+              <button className="btn btn-ghost gate-back-toggle" onClick={() => setCreateOpen(false)}>
+                ← 코드로 로그인 화면으로 돌아가기
+              </button>
+              <div className="gate-divider" />
+            </>
+          )}
+
+          {!createOpen && (
+            <>
+              <h2>코드로 로그인</h2>
+              <p className="gate-desc">
+                이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
+                바로 들어갈 수 있습니다.
+              </p>
+              <input
+                className="input big-input gate-input"
+                placeholder="예: 낭만체육123"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+              />
               <div className="gate-pw-row">
                 <label>개설자 전용 비밀번호</label>
                 <div className="pw-row">
@@ -1860,88 +2039,6 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
               <div className="gate-input-hint">
                 동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
               </div>
-
-              <div className="gate-divider" />
-
-              <button className="btn btn-secondary big-btn gate-create-emphasis" onClick={() => setCreateOpen(true)}>
-                <Plus size={15} /> 처음이신가요? 새 코드 만들기
-              </button>
-            </>
-          )}
-
-          {createOpen && (
-            <>
-              <div className="text-dim small-note gate-code-warn">
-                학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
-                알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
-                이름을 추천합니다.
-              </div>
-              <div className="gate-level-row">
-                <label>학교급</label>
-                <div className="chip-row gate-level-chips">
-                  {SCHOOL_LEVELS.map(l => (
-                    <button
-                      key={l.id}
-                      type="button"
-                      className={"chip" + (schoolLevel === l.id ? " active" : "")}
-                      onClick={() => setSchoolLevel(l.id)}
-                    >
-                      {l.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="gate-pw-row">
-                <label>비밀번호 설정</label>
-                <div className="pw-row">
-                  <input
-                    className="input"
-                    type={showInitialPassword ? "text" : "password"}
-                    value={initialPassword}
-                    onChange={e => setInitialPassword(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                    placeholder="예: 체육0925"
-                  />
-                  <button type="button" className="btn btn-ghost small" onClick={() => setShowInitialPassword(v => !v)}>{showInitialPassword ? "숨기기" : "보기"}</button>
-                </div>
-                <div className="text-dim small-note gate-pw-hint">
-                  동료 교사가 접근 신청 시 입력할 비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
-                  연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
-                </div>
-              </div>
-              <div className="gate-pw-row">
-                <label>개설자 전용 비밀번호</label>
-                <div className="pw-row">
-                  <input
-                    className="input"
-                    type={showFounderPassword ? "text" : "password"}
-                    value={founderPassword}
-                    onChange={e => setFounderPassword(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                    placeholder="예: 원장선생님0925"
-                  />
-                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
-                </div>
-                <div className="text-dim small-note gate-pw-hint">
-                  선생님(개설자) 본인만 알아야 하는 비밀번호입니다. 나중에 다른 기기(휴대폰↔컴퓨터 등)에서
-                  같은 코드와 이 비밀번호를 위 "코드로 로그인" 칸에 입력하면, 승인 절차 없이 곧바로
-                  개설자로 다시 들어올 수 있어요. 위 "비밀번호 설정"과는 다른 값으로 정해주세요
-                  (동료 교사에게는 절대 알려주지 마세요).
-                </div>
-              </div>
-              <button className="btn btn-primary big-btn" disabled={!value.trim()} onClick={submitCode}>
-                만들기
-              </button>
-              <div className="gate-note">
-                <Info size={14} />
-                <span>
-                  이미 등록되어 있는 학교코드라면, 개설자 전용 비밀번호가 맞을 때만 개설자로
-                  들어가지고, 그 외에는 반영되지 않습니다.
-                </span>
-              </div>
-              <button className="btn btn-ghost gate-back-toggle" onClick={() => setCreateOpen(false)}>
-                ← 코드로 로그인 화면으로 돌아가기
-              </button>
             </>
           )}
 
@@ -2049,7 +2146,7 @@ function UserManualModal({ onClose }) {
     { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
     { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
     { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다. 다운로드하면 삭제 안내 팝업이 함께 뜨니, 나이스 등록을 마쳤다면 컴퓨터에서 바로 지워주세요." },
-    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 이때 받는 백업 파일(.json)도 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
+    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 필수인 JSON 백업 외에, 나중에 참고가 필요할 수도 있는 경우를 대비해 나이스 제출양식과 비슷한 형태의 엑셀로 전체 기록을 받아둘 수도 있습니다(선택). 이때 받는 백업 파일들은 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2158,6 +2255,21 @@ function PendingApprovalScreen({ name, type, onCancel }) {
 }
 
 function BlockedScreen({ reason, onRetry }) {
+  if (reason === "no-such-code") {
+    return (
+      <div className="paps-app gate-screen">
+        <div className="gate-card">
+          <Info size={32} color="var(--gold)" />
+          <h2>존재하지 않는 코드입니다</h2>
+          <p className="gate-desc">
+            입력하신 코드를 찾을 수 없습니다. 아직 만들어진 적이 없거나, 이미 "마감"으로
+            삭제된 코드일 수 있습니다. 코드를 다시 확인해 주시거나, 새로 만들어 주세요.
+          </p>
+          <button className="btn btn-primary" onClick={() => onRetry("code")}>처음으로</button>
+        </div>
+      </div>
+    );
+  }
   if (reason === "need-request") {
     return (
       <div className="paps-app gate-screen">
@@ -5542,7 +5654,46 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 
 /* ============================== 학기 마감 ============================== */
 
-function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode }) {
+// 파일명에 다운로드 시점(날짜+시각)이 바로 보이도록 "YYYYMMDD_HHmm" 형태로 만든다. 같은 날
+// 여러 번 백업을 받아도 파일명만 보고 어느 게 최신인지 구분할 수 있게 하기 위함.
+function fileTimestamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+}
+
+// 마감 전, JSON 백업과는 별도로 "혹시 나중에 필요할 수도 있는" 나이스 제출양식 형태의 엑셀로
+// 전체 구성원의 모든 종목 기록을 내려받을 수 있게 한다. 특정 학교의 실제 나이스 업로드
+// 양식(열 구성)은 학교/연도마다 다를 수 있어 그 양식에 정확히 맞추기보다는, 나이스가 흔히
+// 요구하는 열 이름(guessNeisField가 인식하는 헤더와 같은 표기)으로 모든 종목의 세부 측정값을
+// 빠짐없이 한 장에 담는 것을 목표로 한다.
+const CLOSEOUT_NEIS_EXPORT_COLUMNS = [
+  { header: "학년", field: "student_grade" },
+  { header: "반", field: "student_class" },
+  { header: "번호", field: "student_number" },
+  { header: "성명", field: "student_name" },
+  { header: "왕복오래달리기(회)", field: "shuttlerun" },
+  { header: "오래달리기-걷기(초)", field: "run_walk" },
+  { header: "스텝검사(PEI)", field: "step_test" },
+  { header: "윗몸말아올리기(회)", field: "situp" },
+  { header: "팔굽혀펴기(회)", field: "pushup" },
+  { header: "앉아윗몸앞으로굽히기 1차(cm)", field: "sitreach_1" },
+  { header: "앉아윗몸앞으로굽히기 2차(cm)", field: "sitreach_2" },
+  { header: "종합유연성(점)", field: "flex_total" },
+  { header: "제자리멀리뛰기 1차(cm)", field: "longjump_1" },
+  { header: "제자리멀리뛰기 2차(cm)", field: "longjump_2" },
+  { header: "50m달리기(초)", field: "fifty_m" },
+  { header: "악력 1차 왼쪽(kg)", field: "gripstrength_1_left" },
+  { header: "악력 1차 오른쪽(kg)", field: "gripstrength_1_right" },
+  { header: "악력 2차 왼쪽(kg)", field: "gripstrength_2_left" },
+  { header: "악력 2차 오른쪽(kg)", field: "gripstrength_2_right" },
+  { header: "신장(cm)", field: "bmi_height" },
+  { header: "체중(kg)", field: "bmi_weight" },
+  { header: "BMI", field: "bmi_value" },
+  { header: "체지방률(%)", field: "bodyfat" },
+];
+
+function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode, activeYear }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [backedUp, setBackedUp] = useState(false);
   const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
@@ -5564,6 +5715,20 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
     a.remove();
     URL.revokeObjectURL(url);
     setBackedUp(true);
+    setShowDeleteReminder(true);
+  }
+
+  // 위 JSON 백업(프로그램이 스스로 복원하는 용도)과 별개로, 사람이 열어보거나 나이스에 참고할
+  // 수 있는 엑셀 형태 전체 백업. 마감 필수 조건(backedUp)에는 영향을 주지 않는 선택 사항이다.
+  function downloadNeisFullExcelNow() {
+    const sorted = [...students].sort((a, b) => a.grade - b.grade || a.classNum - b.classNum || a.number - b.number);
+    const header = CLOSEOUT_NEIS_EXPORT_COLUMNS.map(c => c.header);
+    const rows = sorted.map(s => CLOSEOUT_NEIS_EXPORT_COLUMNS.map(c => neisFieldValue(s, c.field, records, activeYear)));
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    ws["!cols"] = header.map(() => ({ wch: 14 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "전체기록");
+    XLSX.writeFile(wb, (settings.schoolName || "학교") + "_나이스제출양식_전체기록_" + fileTimestamp() + ".xlsx");
     setShowDeleteReminder(true);
   }
 
@@ -5603,6 +5768,15 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
                 <Copy size={14} /> {backedUp ? "백업 파일 다시 받기" : "지금 백업 파일 받기"}
               </button>
               {backedUp && <div className="closeout-backup-done"><CheckCircle2 size={14} /> 백업을 받았습니다. 이제 마감할 수 있습니다.</div>}
+
+              <div className="text-dim small-note closeout-neis-export-hint">
+                (선택) 위 백업과는 별도로, 전체 학생의 모든 측정 기록을 나이스 제출양식과 비슷한
+                형태의 엑셀 파일로도 받아둘 수 있습니다. 마감에 필수는 아니며, 나중에 참고가
+                필요할 때를 대비한 것입니다.
+              </div>
+              <button className="btn btn-ghost" onClick={downloadNeisFullExcelNow}>
+                <FileSpreadsheet size={14} /> 나이스 제출양식 엑셀로 전체 기록 받기
+              </button>
             </>
           )}
         </div>
@@ -6213,6 +6387,11 @@ function PapsStyles({ children }) {
         }
         .gate-link-btn:hover { background: rgba(255,255,255,0.07); border-color: var(--text-dim); }
         .gate-link-cta { display: inline-block; margin-top: 2px; color: var(--gold); font-weight: 700; font-size: 14px; }
+        .gate-notes-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; }
+        .gate-notes-panel { text-align: left; margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .gate-notes-panel .gate-code-warn, .gate-notes-panel .gate-pw-hint { margin: 0; }
+        .gate-notes-panel .text-dim.small-note { display: flex; gap: 6px; align-items: flex-start; }
+        .gate-notes-panel .text-dim.small-note svg { flex-shrink: 0; margin-top: 2px; }
         @media (max-width: 420px) {
           .gate-input { font-size: 17px; }
         }
@@ -6497,6 +6676,7 @@ function PapsStyles({ children }) {
         .closeout-btn { background: #E85D5D !important; border-color: #E85D5D !important; font-size: 15px; padding: 14px 20px; width: 100%; justify-content: center; }
         .closeout-backup-step { background: rgba(255,201,60,0.08); border: 1px solid rgba(255,201,60,0.3); border-radius: 10px; padding: 14px; margin: 14px 0; }
         .closeout-backup-done { display: flex; align-items: center; gap: 6px; color: #7FD98A; font-size: 13px; margin-top: 8px; font-weight: 600; }
+        .closeout-neis-export-hint { margin-top: 14px; }
         .closeout-step-title { font-weight: 700; font-size: 14px; margin: 16px 0 8px; }
         .closeout-footer { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; }
         .closeout-footer-text { font-size: 12px; color: var(--text-dim); line-height: 1.7; margin: 0; }
