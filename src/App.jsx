@@ -1724,7 +1724,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               settings={settings}
               onCloseout={performSemesterCloseout}
               workspaceCode={workspaceCode}
-              activeYear={activeYear}
             />
           )}
           {view === "access" && role === "admin" && (
@@ -1821,30 +1820,57 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           </button>
           <div className="gate-divider" />
 
-          {/* "새 코드 만들기"를 제목 바로 아래(첫 화면에서 가장 먼저 보이는 위치)로 옮겨
-              처음 오는 선생님이 로그인 화면을 지나칠 필요 없이 바로 시작할 수 있게 한다. */}
+          <h2>코드로 로그인</h2>
+          <p className="gate-desc">
+            이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
+            바로 들어갈 수 있습니다.
+          </p>
+          <input
+            className="input big-input gate-input"
+            placeholder="예: 낭만체육123"
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && value.trim() && !createOpen) submitCode(); }}
+          />
           {!createOpen && (
             <>
+              <div className="gate-pw-row">
+                <label>개설자 전용 비밀번호</label>
+                <div className="pw-row">
+                  <input
+                    className="input"
+                    type={showFounderPassword ? "text" : "password"}
+                    value={founderPassword}
+                    onChange={e => setFounderPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
+                    placeholder="예: 원장선생님0925"
+                  />
+                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
+                </div>
+              </div>
+              <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
+                로그인
+              </button>
+
+              <div className="gate-divider" />
+
+              <button className="gate-link-btn" onClick={() => setMode("notice")}>
+                이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
+              </button>
+              <div className="gate-input-hint">
+                동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
+              </div>
+
+              <div className="gate-divider" />
+
               <button className="btn btn-secondary big-btn gate-create-emphasis" onClick={() => setCreateOpen(true)}>
                 <Plus size={15} /> 처음이신가요? 새 코드 만들기
               </button>
-              <div className="gate-divider" />
             </>
           )}
 
           {createOpen && (
             <>
-              <h2>새 코드 만들기</h2>
-              <p className="gate-desc">
-                우리 학교만의 코드를 새로 만드세요. 학교 이름이 들어가지 않은 코드를 추천합니다.
-              </p>
-              <input
-                className="input big-input gate-input"
-                placeholder="새로 만들 코드 이름, 예: 낭만체육123"
-                value={value}
-                onChange={e => setValue(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-              />
               <div className="text-dim small-note gate-code-warn">
                 학교 이름이 그대로 들어간 코드는 피해주세요. 학년·반·번호와 학교 이름이 함께
                 알려지면 학생이 누구인지 유추될 수 있습니다. "낭만체육123"처럼 학교와 무관한
@@ -1898,7 +1924,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
                 </div>
                 <div className="text-dim small-note gate-pw-hint">
                   선생님(개설자) 본인만 알아야 하는 비밀번호입니다. 나중에 다른 기기(휴대폰↔컴퓨터 등)에서
-                  같은 코드와 이 비밀번호를 "코드로 로그인" 화면에 입력하면, 승인 절차 없이 곧바로
+                  같은 코드와 이 비밀번호를 위 "코드로 로그인" 칸에 입력하면, 승인 절차 없이 곧바로
                   개설자로 다시 들어올 수 있어요. 위 "비밀번호 설정"과는 다른 값으로 정해주세요
                   (동료 교사에게는 절대 알려주지 마세요).
                 </div>
@@ -1916,50 +1942,6 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
               <button className="btn btn-ghost gate-back-toggle" onClick={() => setCreateOpen(false)}>
                 ← 코드로 로그인 화면으로 돌아가기
               </button>
-              <div className="gate-divider" />
-            </>
-          )}
-
-          {!createOpen && (
-            <>
-              <h2>코드로 로그인</h2>
-              <p className="gate-desc">
-                이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
-                바로 들어갈 수 있습니다.
-              </p>
-              <input
-                className="input big-input gate-input"
-                placeholder="예: 낭만체육123"
-                value={value}
-                onChange={e => setValue(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-              />
-              <div className="gate-pw-row">
-                <label>개설자 전용 비밀번호</label>
-                <div className="pw-row">
-                  <input
-                    className="input"
-                    type={showFounderPassword ? "text" : "password"}
-                    value={founderPassword}
-                    onChange={e => setFounderPassword(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && value.trim()) submitCode(); }}
-                    placeholder="예: 원장선생님0925"
-                  />
-                  <button type="button" className="btn btn-ghost small" onClick={() => setShowFounderPassword(v => !v)}>{showFounderPassword ? "숨기기" : "보기"}</button>
-                </div>
-              </div>
-              <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
-                로그인
-              </button>
-
-              <div className="gate-divider" />
-
-              <button className="gate-link-btn" onClick={() => setMode("notice")}>
-                이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
-              </button>
-              <div className="gate-input-hint">
-                동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
-              </div>
             </>
           )}
 
@@ -2067,7 +2049,7 @@ function UserManualModal({ onClose }) {
     { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
     { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
     { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다. 다운로드하면 삭제 안내 팝업이 함께 뜨니, 나이스 등록을 마쳤다면 컴퓨터에서 바로 지워주세요." },
-    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 필수인 JSON 백업 외에, 나중에 참고가 필요할 수도 있는 경우를 대비해 나이스 제출양식과 비슷한 형태의 엑셀로 전체 기록을 받아둘 수도 있습니다(선택). 이때 받는 백업 파일들은 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
+    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 이때 받는 백업 파일(.json)도 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -5560,46 +5542,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
 
 /* ============================== 학기 마감 ============================== */
 
-// 파일명에 다운로드 시점(날짜+시각)이 바로 보이도록 "YYYYMMDD_HHmm" 형태로 만든다. 같은 날
-// 여러 번 백업을 받아도 파일명만 보고 어느 게 최신인지 구분할 수 있게 하기 위함.
-function fileTimestamp() {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, "0");
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
-}
-
-// 마감 전, JSON 백업과는 별도로 "혹시 나중에 필요할 수도 있는" 나이스 제출양식 형태의 엑셀로
-// 전체 구성원의 모든 종목 기록을 내려받을 수 있게 한다. 특정 학교의 실제 나이스 업로드
-// 양식(열 구성)은 학교/연도마다 다를 수 있어 그 양식에 정확히 맞추기보다는, 나이스가 흔히
-// 요구하는 열 이름(guessNeisField가 인식하는 헤더와 같은 표기)으로 모든 종목의 세부 측정값을
-// 빠짐없이 한 장에 담는 것을 목표로 한다.
-const CLOSEOUT_NEIS_EXPORT_COLUMNS = [
-  { header: "학년", field: "student_grade" },
-  { header: "반", field: "student_class" },
-  { header: "번호", field: "student_number" },
-  { header: "성명", field: "student_name" },
-  { header: "왕복오래달리기(회)", field: "shuttlerun" },
-  { header: "오래달리기-걷기(초)", field: "run_walk" },
-  { header: "스텝검사(PEI)", field: "step_test" },
-  { header: "윗몸말아올리기(회)", field: "situp" },
-  { header: "팔굽혀펴기(회)", field: "pushup" },
-  { header: "앉아윗몸앞으로굽히기 1차(cm)", field: "sitreach_1" },
-  { header: "앉아윗몸앞으로굽히기 2차(cm)", field: "sitreach_2" },
-  { header: "종합유연성(점)", field: "flex_total" },
-  { header: "제자리멀리뛰기 1차(cm)", field: "longjump_1" },
-  { header: "제자리멀리뛰기 2차(cm)", field: "longjump_2" },
-  { header: "50m달리기(초)", field: "fifty_m" },
-  { header: "악력 1차 왼쪽(kg)", field: "gripstrength_1_left" },
-  { header: "악력 1차 오른쪽(kg)", field: "gripstrength_1_right" },
-  { header: "악력 2차 왼쪽(kg)", field: "gripstrength_2_left" },
-  { header: "악력 2차 오른쪽(kg)", field: "gripstrength_2_right" },
-  { header: "신장(cm)", field: "bmi_height" },
-  { header: "체중(kg)", field: "bmi_weight" },
-  { header: "BMI", field: "bmi_value" },
-  { header: "체지방률(%)", field: "bodyfat" },
-];
-
-function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode, activeYear }) {
+function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [backedUp, setBackedUp] = useState(false);
   const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
@@ -5621,20 +5564,6 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
     a.remove();
     URL.revokeObjectURL(url);
     setBackedUp(true);
-    setShowDeleteReminder(true);
-  }
-
-  // 위 JSON 백업(프로그램이 스스로 복원하는 용도)과 별개로, 사람이 열어보거나 나이스에 참고할
-  // 수 있는 엑셀 형태 전체 백업. 마감 필수 조건(backedUp)에는 영향을 주지 않는 선택 사항이다.
-  function downloadNeisFullExcelNow() {
-    const sorted = [...students].sort((a, b) => a.grade - b.grade || a.classNum - b.classNum || a.number - b.number);
-    const header = CLOSEOUT_NEIS_EXPORT_COLUMNS.map(c => c.header);
-    const rows = sorted.map(s => CLOSEOUT_NEIS_EXPORT_COLUMNS.map(c => neisFieldValue(s, c.field, records, activeYear)));
-    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws["!cols"] = header.map(() => ({ wch: 14 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "전체기록");
-    XLSX.writeFile(wb, (settings.schoolName || "학교") + "_나이스제출양식_전체기록_" + fileTimestamp() + ".xlsx");
     setShowDeleteReminder(true);
   }
 
@@ -5674,15 +5603,6 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
                 <Copy size={14} /> {backedUp ? "백업 파일 다시 받기" : "지금 백업 파일 받기"}
               </button>
               {backedUp && <div className="closeout-backup-done"><CheckCircle2 size={14} /> 백업을 받았습니다. 이제 마감할 수 있습니다.</div>}
-
-              <div className="text-dim small-note closeout-neis-export-hint">
-                (선택) 위 백업과는 별도로, 전체 학생의 모든 측정 기록을 나이스 제출양식과 비슷한
-                형태의 엑셀 파일로도 받아둘 수 있습니다. 마감에 필수는 아니며, 나중에 참고가
-                필요할 때를 대비한 것입니다.
-              </div>
-              <button className="btn btn-ghost" onClick={downloadNeisFullExcelNow}>
-                <FileSpreadsheet size={14} /> 나이스 제출양식 엑셀로 전체 기록 받기
-              </button>
             </>
           )}
         </div>
@@ -6577,7 +6497,6 @@ function PapsStyles({ children }) {
         .closeout-btn { background: #E85D5D !important; border-color: #E85D5D !important; font-size: 15px; padding: 14px 20px; width: 100%; justify-content: center; }
         .closeout-backup-step { background: rgba(255,201,60,0.08); border: 1px solid rgba(255,201,60,0.3); border-radius: 10px; padding: 14px; margin: 14px 0; }
         .closeout-backup-done { display: flex; align-items: center; gap: 6px; color: #7FD98A; font-size: 13px; margin-top: 8px; font-weight: 600; }
-        .closeout-neis-export-hint { margin-top: 14px; }
         .closeout-step-title { font-weight: 700; font-size: 14px; margin: 16px 0 8px; }
         .closeout-footer { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; }
         .closeout-footer-text { font-size: 12px; color: var(--text-dim); line-height: 1.7; margin: 0; }
