@@ -819,7 +819,12 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     pendingViewerPasswordRef.current = (viewerPassword || "").trim();
     pendingFounderPasswordRef.current = (founderPassword || "").trim();
     pendingIntentRef.current = intent === "create" ? "create" : "login";
-    saveWorkspaceCodeRemote(code);
+    // 여기서는 아직 "마지막으로 쓴 코드"로 저장하지 않는다. 실제로 개설자·조회자·수정권한자로
+    // 확인되기 전에 미리 저장해 버리면, 예를 들어 이미 다른 선생님이 만든 코드인 줄 모르고
+    // 입력해 "접근 신청이 필요합니다" 화면을 만난 뒤 앱을 껐다가 다시 켰을 때, 실제로는 아직
+    // 아무 권한도 없는데 그 코드가 자동으로 다시 불러와져서 곧바로 같은 안내 화면으로 돌아가
+    // 버리는 문제가 있었다. 저장은 아래 접근 권한 확인 로직에서 실제로 admin/viewer 권한이
+    // 확정된 시점에만 한다.
     setWorkspaceCode(code);
   }
 
@@ -855,6 +860,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           // "새 코드 만들기"로 직접 제출한 경우에만, 지금 이 사람을 새 개설자로 만든다.
           const newId = uid("dev");
           await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
+          await saveWorkspaceCodeRemote(workspaceCode);
           setMyDeviceId(newId);
           setIsFounder(true);
           setMyDisplayName("개설자");
@@ -884,6 +890,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setIsFounder(!mine);
         setMyDisplayName(mine ? mine.name : "개설자");
         setAccessList(list);
+        await saveWorkspaceCodeRemote(workspaceCode);
         setRole("admin");
         setRoleChecking(false);
         return;
@@ -895,11 +902,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         if (mine && mine.status === "approved") {
           const grantedRole = mine.type === "editor" ? "admin" : "viewer";
           await saveDeviceRole(workspaceCode, { id: device.id, role: grantedRole });
+          await saveWorkspaceCodeRemote(workspaceCode);
           setIsFounder(false);
           setMyDisplayName(mine.name);
           setRole(grantedRole);
           setAccessList(list);
         } else if (mine && mine.status === "denied") {
+          // 승인 대기·거절 안내 화면은 "접속된 상태"가 아니므로, 여기서 나갔다가 다시
+          // 들어오면 곧바로 이 화면으로 되돌아가지 않고 처음 화면부터 시작하게 한다.
+          await clearSavedWorkspaceCode();
           setRole("blocked");
           setBlockReason("denied");
         } else if (mine && mine.status === "pending") {
@@ -908,6 +919,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         } else {
           // 요청 기록을 찾을 수 없음(관리자가 삭제 등) — 취소된 것으로 처리
           await clearDeviceRole(workspaceCode);
+          await clearSavedWorkspaceCode();
           setRole("blocked");
           setBlockReason("revoked");
         }
@@ -923,6 +935,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       if (founderPw && pendingFounderPasswordRef.current && pendingFounderPasswordRef.current === founderPw) {
         const newId = uid("dev");
         await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
+        await saveWorkspaceCodeRemote(workspaceCode);
         setMyDeviceId(newId);
         setIsFounder(true);
         setMyDisplayName("개설자");
@@ -931,6 +944,11 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         return;
       }
 
+      // 아직 아무 권한도 없이 "이미 있는 코드"를 만난 경우(접근 신청이 필요한 상태)다.
+      // 실제로 접근 신청을 마치기 전까지는 이 코드를 "마지막으로 쓴 코드"로 남겨두지 않는다.
+      // 그래야 이 안내 화면을 보고 나갔다가 다시 들어와도 곧장 같은 화면으로 되돌아가지 않고
+      // 처음 화면부터 다시 시작한다.
+      await clearSavedWorkspaceCode();
       setRole("blocked");
       setBlockReason("need-request");
       setRoleChecking(false);
@@ -1826,13 +1844,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   const [wantsEdit, setWantsEdit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
-  const [visitStats, setVisitStats] = useState(null);
   const [manualOpen, setManualOpen] = useState(false);
-
-  // 방문자 통계는 누구나 볼 수 있게 첫 화면에 그냥 표시한다.
-  useEffect(() => {
-    loadVisitStats().then(setVisitStats);
-  }, []);
 
   async function handleRequestSubmit() {
     if (!name.trim() || !reqCode.trim() || !reqPassword.trim()) return;
@@ -2024,12 +2036,6 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             </>
           )}
 
-          {visitStats && (
-            <div className="visit-stats-row">
-              <span>오늘 방문 <b>{visitStats.daily}</b></span>
-              <span>누적 방문 <b>{visitStats.total}</b></span>
-            </div>
-          )}
         </div>
         {manualOpen && <UserManualModal onClose={() => setManualOpen(false)} />}
       </div>
@@ -6354,11 +6360,6 @@ function PapsStyles({ children }) {
         .gate-input { width: 100%; text-align: center; margin-bottom: 4px; }
         .gate-input-hint { font-size: 13px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
         .gate-note { display: flex; gap: 8px; text-align: left; font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-top: 14px; }
-        .visit-stats-row {
-          display: flex; justify-content: center; gap: 18px; margin-top: 14px; padding-top: 14px;
-          border-top: 1px solid var(--line); font-size: 11px; color: var(--text-dim); width: 100%;
-        }
-        .visit-stats-row b { font-family: 'Oswald', sans-serif; color: var(--gold); font-size: 13px; }
         .gate-link { background: none; border: none; color: var(--text-dim); font-size: 12px; text-decoration: underline; cursor: pointer; margin-top: 10px; }
         .gate-link:hover { color: var(--text); }
         .gate-link-btn {
