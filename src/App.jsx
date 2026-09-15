@@ -4,7 +4,7 @@ import {
   ClipboardList, Monitor, X, Maximize2, Minimize2, AlertTriangle,
   CheckCircle2, XCircle, Info, Play,
   RotateCcw, Square, Smartphone, Copy,
-  FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff
+  FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff, Flag
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { storage } from "./storage.js";
@@ -1422,6 +1422,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     // 화면은 첫 화면으로 돌아가더라도, 앱을 나갔다가 다시 열 때(특히 모바일) 이 기기가
     // 방금 지운 코드를 자동으로 다시 불러와 재접속을 시도하는 문제가 있었다.
     await clearSavedWorkspaceCode().catch(() => {});
+    // "백업을 받았다" 로컬 기록도 함께 지운다. 나중에 같은 코드 이름이 다시 개설되었을 때
+    // 예전 백업 표시가 잘못 남아있지 않도록 한다.
+    await storage.delete(closeoutBackupFlagKey(workspaceCode), false).catch(() => {});
     // 이 기기에 남아있던 학생 이름표(익명화를 위해 로컬에만 저장해뒀던 실명 매핑)도 함께
     // 지운다 — 서버 데이터가 사라진 뒤에도 이 브라우저에만 실명이 남아있지 않도록 한다.
     try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
@@ -4114,7 +4117,13 @@ function FiftyMGroupTimer({ eventId, students, activeYear, onSave, showToast, sc
                   <option value="">학생 선택</option>
                   {classRoster.map(s => <option key={s.id} value={s.id}>{s.number}. {s.name}</option>)}
                 </select>
-                <button className="btn btn-secondary small" disabled={!running || !slot.studentId} onClick={() => captureSlot(i)}>기록</button>
+                <button
+                  className={"fiftym-capture-btn" + (running && slot.studentId && slot.time === null ? " armed" : "")}
+                  disabled={!running || !slot.studentId}
+                  onClick={() => captureSlot(i)}
+                >
+                  <Flag size={15} /> 기록
+                </button>
                 <input
                   className="input fiftym-slot-time-input"
                   type="number"
@@ -5650,6 +5659,15 @@ function fileTimestamp() {
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
 }
 
+// 마감 화면의 "백업을 받았다" 표시는 지금까지 컴포넌트 안의 메모리 상태(useState)로만
+// 남아 있어서, 모바일에서 백업 파일을 실제로 받았더라도 탭을 옮겼다 오거나(화면이 다시
+// 그려짐) 브라우저가 배경 탭을 자동으로 새로고침해버리면 그 표시가 사라져 "마감하기"
+// 버튼이 다시 눌리지 않는 문제가 있었다. 이 기기의 로컬 저장소에 "몇 명/몇 건일 때
+// 백업했는지"를 함께 남겨, 같은 기기에서 다시 열었을 때 그 수치가 지금과 같으면(=그
+// 사이 데이터가 더 늘지 않았으면) 굳이 다시 받지 않아도 되게 한다. 반대로 백업 이후
+// 학생이나 기록이 더 늘었다면 그 백업은 최신 상태를 담고 있지 않으므로 다시 받게 한다.
+function closeoutBackupFlagKey(code) { return "paps:closeout-backedup:" + code; }
+
 // 마감 전, JSON 백업과는 별도로 "혹시 나중에 필요할 수도 있는" 나이스 제출양식 형태의 엑셀로
 // 전체 구성원의 모든 종목 기록을 내려받을 수 있게 한다. 특정 학교의 실제 나이스 업로드
 // 양식(열 구성)은 학교/연도마다 다를 수 있어 그 양식에 정확히 맞추기보다는, 나이스가 흔히
@@ -5690,6 +5708,26 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
   const studentCount = students.length;
   const isEmpty = studentCount === 0 && recordCount === 0;
 
+  // 이 기기에서 이 코드로 예전에 이미 백업을 받은 적이 있고, 그때와 지금의 학생 수·기록
+  // 건수가 똑같다면(=그 사이 데이터가 늘지 않았다면) "백업을 받았다" 상태를 그대로
+  // 되살린다. 모바일에서 탭이 새로고침되거나 다른 탭에 갔다 와서 화면이 다시 그려져도,
+  // 실제로는 이미 받아둔 백업이 있으면 "마감하기" 버튼이 다시 막히지 않게 하기 위함이다.
+  useEffect(() => {
+    if (!workspaceCode) return;
+    let cancelled = false;
+    (async () => {
+      const r = await storage.get(closeoutBackupFlagKey(workspaceCode), false);
+      if (cancelled || !r) return;
+      try {
+        const saved = JSON.parse(r.value);
+        if (saved && saved.studentCount === studentCount && saved.recordCount === recordCount) {
+          setBackedUp(true);
+        }
+      } catch (e) { /* 저장된 값이 이상하면 그냥 무시하고 다시 받게 한다 */ }
+    })();
+    return () => { cancelled = true; };
+  }, [workspaceCode, studentCount, recordCount]);
+
   function downloadBackupNow() {
     const payload = { exportedAt: Date.now(), students, criteria, settings, records };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -5704,6 +5742,9 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
     URL.revokeObjectURL(url);
     setBackedUp(true);
     setShowDeleteReminder(true);
+    if (workspaceCode) {
+      storage.set(closeoutBackupFlagKey(workspaceCode), JSON.stringify({ studentCount, recordCount }), false);
+    }
   }
 
   // 위 JSON 백업(프로그램이 스스로 복원하는 용도)과 별개로, 사람이 열어보거나 나이스에 참고할
@@ -6981,13 +7022,30 @@ function PapsStyles({ children }) {
         .fiftym-count-btn:hover:not(:disabled) { background: rgba(230,57,70,0.18); border-color: var(--track-red); }
         .fiftym-count-btn:disabled { opacity: 0.35; cursor: not-allowed; }
         .fiftym-slots { width: 100%; display: flex; flex-direction: column; gap: 8px; }
-        .fiftym-slot { display: grid; grid-template-columns: 40px 1fr 70px 70px; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+        .fiftym-slot { display: grid; grid-template-columns: 40px 1fr 92px 70px; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; }
         .fiftym-picker { display: flex; gap: 4px; min-width: 0; }
         .fiftym-picker .select { min-width: 0; flex: 1; padding: 6px 4px; font-size: 12px; }
         .fiftym-slot-time-input { text-align: center; font-family: 'Oswald', sans-serif; }
+        .fiftym-capture-btn {
+          display: flex; align-items: center; justify-content: center; gap: 4px;
+          min-height: 44px; padding: 8px 6px; border-radius: 8px; border: 2px solid var(--gold);
+          background: var(--gold); color: #1a1a1a; font-weight: 800; font-size: 14px;
+          cursor: pointer; transition: transform 0.1s ease; white-space: nowrap;
+        }
+        .fiftym-capture-btn:disabled {
+          background: rgba(255,255,255,0.06); border-color: var(--line); color: var(--text-dim);
+          font-weight: 600; cursor: not-allowed;
+        }
+        .fiftym-capture-btn:not(:disabled):active { transform: scale(0.93); }
+        .fiftym-capture-btn.armed { animation: fiftymCaptureArmed 1s ease-in-out infinite; }
+        @keyframes fiftymCaptureArmed {
+          0%, 100% { box-shadow: 0 0 0 3px rgba(255,201,60,0.45); }
+          50% { box-shadow: 0 0 0 7px rgba(255,201,60,0.12); }
+        }
         @media (max-width: 700px) {
           .fiftym-slot { grid-template-columns: 1fr; gap: 6px; }
           .fiftym-picker { flex-wrap: wrap; }
+          .fiftym-capture-btn { min-height: 48px; font-size: 15px; }
         }
         .fiftym-slot-num { font-family: 'Oswald', sans-serif; font-size: 13px; color: var(--text-dim); }
         .fiftym-slot-time { font-family: 'Oswald', sans-serif; font-size: 15px; text-align: right; font-variant-numeric: tabular-nums; }
