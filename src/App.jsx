@@ -1862,9 +1862,9 @@ function IntroSplash({ onDone }) {
     <div className={"paps-app intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)}>
       <div className="intro-splash-glow" />
       <div className="intro-splash-emblem">
-        <Medal size={34} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
-        <Trophy size={56} className="intro-icon intro-icon-main" style={{ animationDelay: "0.2s" }} />
-        <Award size={34} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
+        <Medal size={64} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
+        <Trophy size={104} className="intro-icon intro-icon-main" style={{ animationDelay: "0.2s" }} />
+        <Award size={64} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
       </div>
       <div className="intro-splash-title" aria-label={title}>
         {title.split("").map((ch, i) => (
@@ -1876,7 +1876,6 @@ function IntroSplash({ onDone }) {
       <div className="intro-splash-tagline" style={{ animationDelay: "1.1s" }}>
         측정부터 등급, 나이스 제출까지 — 한 번에
       </div>
-      <div className="intro-splash-skip" style={{ animationDelay: "1.5s" }}>탭하면 바로 시작</div>
     </div>
   );
 }
@@ -6433,34 +6432,39 @@ function PapsStyles({ children }) {
 
         .intro-splash {
           position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column;
-          align-items: center; justify-content: center; gap: 10px; overflow: hidden;
-          cursor: pointer; opacity: 1; transition: opacity 0.6s ease;
+          align-items: center; justify-content: center; gap: clamp(14px, 3vh, 26px); overflow: hidden;
+          cursor: pointer; opacity: 1; transition: opacity 0.6s ease; padding: 24px; text-align: center;
         }
         .intro-splash.intro-fading { opacity: 0; }
         .intro-splash-glow {
-          position: absolute; top: 50%; left: 50%; width: 480px; height: 480px;
+          position: absolute; top: 50%; left: 50%; width: min(140vw, 900px); height: min(140vw, 900px);
           transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
-          background: radial-gradient(circle, rgba(255,201,60,0.22) 0%, transparent 70%);
+          background: radial-gradient(circle, rgba(255,201,60,0.3) 0%, transparent 68%);
           animation: introGlowPulse 2.4s ease-in-out infinite;
         }
         @keyframes introGlowPulse {
           0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
           50% { opacity: 1; transform: translate(-50%, -50%) scale(1.12); }
         }
-        .intro-splash-emblem { display: flex; align-items: flex-end; gap: 16px; position: relative; z-index: 1; }
+        .intro-splash-emblem { display: flex; align-items: flex-end; gap: clamp(10px, 4vw, 24px); position: relative; z-index: 1; }
         .intro-icon {
-          color: var(--gold); opacity: 0; filter: drop-shadow(0 0 14px rgba(255,201,60,0.6));
+          color: var(--gold); opacity: 0; filter: drop-shadow(0 0 22px rgba(255,201,60,0.65));
           animation: introIconDrop 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
         }
-        .intro-icon-side { color: var(--silver); filter: drop-shadow(0 0 8px rgba(200,210,220,0.4)); margin-bottom: 6px; }
+        .intro-icon-main { width: clamp(72px, 22vw, 128px) !important; height: clamp(72px, 22vw, 128px) !important; }
+        .intro-icon-side {
+          color: var(--silver); filter: drop-shadow(0 0 12px rgba(200,210,220,0.45)); margin-bottom: clamp(4px, 1.5vw, 10px);
+          width: clamp(42px, 13vw, 78px) !important; height: clamp(42px, 13vw, 78px) !important;
+        }
         @keyframes introIconDrop {
           0% { opacity: 0; transform: translateY(-46px) scale(0.7); }
           60% { opacity: 1; }
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         .intro-splash-title {
-          display: flex; font-family: 'Oswald', sans-serif; font-size: 34px; font-weight: 700;
-          letter-spacing: 2px; color: var(--text); position: relative; z-index: 1;
+          display: flex; flex-wrap: wrap; justify-content: center; font-family: 'Oswald', sans-serif;
+          font-size: clamp(40px, 13vw, 84px); font-weight: 700; letter-spacing: clamp(1px, 0.5vw, 3px);
+          color: var(--text); position: relative; z-index: 1;
         }
         .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
         @keyframes introLetterDrop {
@@ -6468,19 +6472,15 @@ function PapsStyles({ children }) {
           100% { opacity: 1; transform: translateY(0); }
         }
         .intro-splash-tagline {
-          font-size: 14px; color: var(--text-dim); opacity: 0; position: relative; z-index: 1;
+          font-size: clamp(14px, 4vw, 20px); color: var(--text-dim); opacity: 0; position: relative; z-index: 1;
           animation: introFadeUp 0.6s ease forwards;
-        }
-        .intro-splash-skip {
-          margin-top: 18px; font-size: 12px; color: var(--text-dim); opacity: 0;
-          position: relative; z-index: 1; animation: introFadeUp 0.6s ease forwards;
         }
         @keyframes introFadeUp {
           0% { opacity: 0; transform: translateY(10px); }
           100% { opacity: 0.85; transform: translateY(0); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .intro-splash, .intro-icon, .intro-letter, .intro-splash-tagline, .intro-splash-skip, .intro-splash-glow { animation: none !important; opacity: 1 !important; transform: none !important; }
+          .intro-splash, .intro-icon, .intro-letter, .intro-splash-tagline, .intro-splash-glow { animation: none !important; opacity: 1 !important; transform: none !important; }
         }
 
         .paps-loading {
