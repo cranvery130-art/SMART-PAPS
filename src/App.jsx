@@ -776,6 +776,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     const timer = setInterval(() => {
       if (Date.now() - lastActivityRef.current >= IDLE_TIMEOUT_MS) {
         setIdleLocked(true);
+        storage.set(idleLockFlagKey(workspaceCode), "1", false).catch(() => {});
       }
     }, 15000);
 
@@ -783,13 +784,14 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       activityEvents.forEach(ev => window.removeEventListener(ev, markActive));
       clearInterval(timer);
     };
-  }, [role, presentation, settings.viewerPassword]);
+  }, [role, presentation, settings.viewerPassword, workspaceCode]);
 
   function handleIdleUnlockAttempt(pw) {
     if (pw && settings.viewerPassword && pw === settings.viewerPassword) {
       setIdleLocked(false);
       setIdleLockError("");
       lastActivityRef.current = Date.now();
+      storage.delete(idleLockFlagKey(workspaceCode), false).catch(() => {});
     } else {
       setIdleLockError("비밀번호가 올바르지 않습니다.");
     }
@@ -1146,6 +1148,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       setSettings(finalCfg.settings);
       setCodeCreatedAt(finalCfg.createdAt);
       setRecords(migratedRecords);
+      // 화면이 잠긴 채로 새로고침돼도 잠금이 풀리지 않도록, 이 기기에 남아있는 "자동 잠금"
+      // 표시를 확인해 복원한다. 빔프로젝터 새 창(forcePresentation)은 별도의 잠금 방식을
+      // 쓰므로 대상에서 제외하고, 그 사이 접근 신청 비밀번호가 사라졌다면(=풀 방법이
+      // 없어졌다면) 오래된 표시를 지워 영영 잠긴 채로 남지 않게 한다.
+      if (finalCfg.settings?.viewerPassword && !forcePresentation) {
+        const idleFlag = await storage.get(idleLockFlagKey(workspaceCode), false).catch(() => null);
+        if (idleFlag) setIdleLocked(true);
+      } else if (!finalCfg.settings?.viewerPassword) {
+        await storage.delete(idleLockFlagKey(workspaceCode), false).catch(() => {});
+      }
       // 연도 선택은 저장된 값이 아니라 "지금 실제 연도"로 항상 자동 설정한다. 저장된 값을
       // 그대로 쓰면, 작년에 만든 워크스페이스를 올해 다시 열었을 때 여전히 작년으로 남아있게 된다.
       setActiveYear(thisYear());
@@ -1429,6 +1441,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     // "백업을 받았다" 로컬 기록도 함께 지운다. 나중에 같은 코드 이름이 다시 개설되었을 때
     // 예전 백업 표시가 잘못 남아있지 않도록 한다.
     await storage.delete(closeoutBackupFlagKey(workspaceCode), false).catch(() => {});
+    // 자동 잠금 표시도 함께 지운다 — 나중에 같은 코드 이름이 다시 개설됐을 때 예전 잠금
+    // 표시 때문에 새 워크스페이스가 이유 없이 잠긴 채로 시작하지 않도록 한다.
+    await storage.delete(idleLockFlagKey(workspaceCode), false).catch(() => {});
     // 이 기기에 남아있던 학생 이름표(익명화를 위해 로컬에만 저장해뒀던 실명 매핑)도 함께
     // 지운다 — 서버 데이터가 사라진 뒤에도 이 브라우저에만 실명이 남아있지 않도록 한다.
     try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
@@ -5736,6 +5751,13 @@ function fileTimestamp() {
 // 사이 데이터가 더 늘지 않았으면) 굳이 다시 받지 않아도 되게 한다. 반대로 백업 이후
 // 학생이나 기록이 더 늘었다면 그 백업은 최신 상태를 담고 있지 않으므로 다시 받게 한다.
 function closeoutBackupFlagKey(code) { return "paps:closeout-backedup:" + code; }
+
+// 공용 PC 자동 잠금(idleLocked)도 지금까지는 컴포넌트 메모리 상태로만 남아 있어서, 화면이
+// 잠긴 상태에서 새로고침(F5)하면 컴포넌트가 새로 마운트되며 잠금이 풀린 채로 시작해버리는
+// 문제가 있었다 — 비밀번호를 몰라도 새로고침 한 번이면 학생 개인정보 화면에 그대로 들어갈
+// 수 있어 잠금 기능 자체가 무력화됐다. 이 기기의 로컬 저장소에 "지금 잠겨 있다"는 표시를
+// 함께 남겨, 새로고침 뒤에도 비밀번호를 다시 입력해야 풀리게 한다.
+function idleLockFlagKey(code) { return "paps:idle-locked:" + code; }
 
 // 마감 전, JSON 백업과는 별도로 "혹시 나중에 필요할 수도 있는" 나이스 제출양식 형태의 엑셀로
 // 전체 구성원의 모든 종목 기록을 내려받을 수 있게 한다. 특정 학교의 실제 나이스 업로드
