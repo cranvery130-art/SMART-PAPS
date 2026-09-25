@@ -683,6 +683,10 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   // 다시 만들어지는 문제가 있었다.
   const pendingIntentRef = useRef("login");
   const [workspaceChecking, setWorkspaceChecking] = useState(true);
+  // 첫 화면(코드 입력 전) 위에 잠깐 뜨는 홍보용 인트로 연출 — 한 번 지나가면 이 세션
+  // 동안은 다시 안 뜨게 한다(코드 로그인/마감 등으로 첫 화면을 여러 번 오갈 때마다 매번
+  // 반복되면 번거로우므로).
+  const [showIntro, setShowIntro] = useState(true);
   const [role, setRole] = useState(null); // 'admin' | 'viewer' | 'pending' | 'blocked'
   const [isFounder, setIsFounder] = useState(false);
   const [myDisplayName, setMyDisplayName] = useState("개설자");
@@ -1578,6 +1582,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   if (!workspaceCode) {
     return (
       <PapsStyles>
+        {showIntro && <IntroSplash onDone={() => setShowIntro(false)} />}
         <WorkspaceGate onSubmit={submitWorkspaceCode} onRequestAccess={requestAccess} initialMode={gateInitialMode} />
       </PapsStyles>
     );
@@ -1825,6 +1830,54 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         )}
       </div>
     </PapsStyles>
+  );
+}
+
+/* ============================== 첫 화면 인트로 연출 ============================== */
+
+// 코드 입력 화면(WorkspaceGate)이 뜨기 직전에 잠깐 나타나는 홍보용 인트로. 트로피·메달
+// 같은 상징 요소가 위에서부터 하나씩 나타났다가, 잠시 후 전체가 사라지면서 그 아래 이미
+// 준비되어 있던 첫 화면이 자연스럽게 드러나는 방식(교차 페이드)으로 만든다. 움직임을
+// 줄이도록 설정한 기기(prefers-reduced-motion)에서는 연출 없이 곧바로 건너뛴다.
+function IntroSplash({ onDone }) {
+  const [fading, setFading] = useState(false);
+  const title = "SMART PAPS";
+
+  useEffect(() => {
+    let reduced = false;
+    try { reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* 무시 */ }
+    if (reduced) { onDone(); return; }
+    const holdTimer = setTimeout(() => setFading(true), 2300);
+    return () => clearTimeout(holdTimer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!fading) return;
+    const t = setTimeout(onDone, 650);
+    return () => clearTimeout(t);
+  }, [fading, onDone]);
+
+  return (
+    <div className={"paps-app intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)}>
+      <div className="intro-splash-glow" />
+      <div className="intro-splash-emblem">
+        <Medal size={34} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
+        <Trophy size={56} className="intro-icon intro-icon-main" style={{ animationDelay: "0.2s" }} />
+        <Award size={34} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
+      </div>
+      <div className="intro-splash-title" aria-label={title}>
+        {title.split("").map((ch, i) => (
+          <span key={i} className="intro-letter" style={{ animationDelay: (0.42 + i * 0.045) + "s" }}>
+            {ch === " " ? " " : ch}
+          </span>
+        ))}
+      </div>
+      <div className="intro-splash-tagline" style={{ animationDelay: "1.1s" }}>
+        측정부터 등급, 나이스 제출까지 — 한 번에
+      </div>
+      <div className="intro-splash-skip" style={{ animationDelay: "1.5s" }}>탭하면 바로 시작</div>
+    </div>
   );
 }
 
@@ -2130,9 +2183,10 @@ function UserManualModal({ onClose }) {
   const [codeNoteOpen, setCodeNoteOpen] = useState(false);
   const [mobileNoteOpen, setMobileNoteOpen] = useState(false);
   const [nameNoteOpen, setNameNoteOpen] = useState(false);
+  const [rosterNoteOpen, setRosterNoteOpen] = useState(false);
   const steps = [
     { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
-    { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 끌어다 놓으면 한 번에 등록됩니다." },
+    { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 올리면(PC는 끌어다 놓기, 휴대폰은 탭해서 선택) 한 번에 등록됩니다." },
     { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다. 체육관 등에서 화면을 여러 학생이 함께 보는 상황이라면, 화면 위쪽의 \"이름 가림\" 버튼을 눌러 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력할 수 있습니다." },
     { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
     { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
@@ -2196,6 +2250,22 @@ function UserManualModal({ onClose }) {
                         엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을 채워 넣으며,
                         실명이 필요한 목적이라 의도적으로 포함시킵니다. JSON 백업은 여러 명이
                         각자 백업하면 혼선이 생길 수 있어 개설자만 내보내고 불러올 수 있습니다.
+                      </div>
+                    )}
+                    <button type="button" className="manual-note-btn" onClick={() => setRosterNoteOpen(v => !v)}>
+                      참고사항 {rosterNoteOpen ? "▲" : "▼"}
+                    </button>
+                    {rosterNoteOpen && (
+                      <div className="manual-note-box">
+                        <b>엑셀로 한 번에 등록하기</b>: 휴대폰에 저장해 둔 명렬표 파일도 그대로 쓸 수
+                        있습니다. 끌어다 놓기 대신, "엑셀 파일을 여기로 끌어다 놓거나 눌러서
+                        선택하세요" 칸을 탭하면 휴대폰의 파일 선택 화면(파일 앱, 다운로드 폴더,
+                        클라우드 드라이브 등)이 열립니다.<br /><br />
+                        나이스 "학생명렬 내려받기"로 받은 파일을 올려야 성별이 정확히 들어갑니다.
+                        성별 열이 없거나 인식되지 않으면 학생 전원이 자동으로 "여"로 등록되니, 올린
+                        뒤에는 명단에서 성별이 맞게 들어갔는지 꼭 확인해 주세요.<br /><br />
+                        같은 파일을 실수로 다시 올려도 괜찮습니다. 학년·반·번호가 같은 학생은 새로
+                        추가되지 않고 기존 정보가 갱신될 뿐이라, 중복 학생이 생기지 않습니다.
                       </div>
                     )}
                   </>
@@ -2715,7 +2785,7 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
       title: "데이터 관리",
       items: [
         "백업 파일로 데이터 손실 위험 최소화 — 여러 명이 각자 백업·복원하면 최신 기록이 뒤섞일 수 있어 개설자만 가능",
-        "나이스 측정명단 양식 엑셀 파일 첨부로 명단 반영 — 학생관리에서 파일만 올리면 학년·반·번호·이름을 자동으로 채워줌",
+        "나이스 측정명단 양식 엑셀 파일 첨부로 명단 반영 — 학생관리에서 파일만 올리면(휴대폰은 탭해서 선택) 학년·반·번호·이름을 자동으로 채워줌",
         "나이스 '자료올리기'용 엑셀 형식 지원 — 프로그램 내 기록을 토대로 나이스 업로드 양식에 맞춰 채워줌",
         "마감 시 백업 필수화로 학생 개인정보 최소 보관",
         "1년 지난 코드는 자동 마감 — 마감을 깜빡 잊어도 개설 1년 후 자동으로 전체 삭제되어 기록이 쌓이지 않음(만료 30일 전부터 경고, 연장 가능)",
@@ -6360,6 +6430,58 @@ function PapsStyles({ children }) {
           box-sizing: border-box;
         }
         .paps-app * { box-sizing: border-box; }
+
+        .intro-splash {
+          position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 10px; overflow: hidden;
+          cursor: pointer; opacity: 1; transition: opacity 0.6s ease;
+        }
+        .intro-splash.intro-fading { opacity: 0; }
+        .intro-splash-glow {
+          position: absolute; top: 50%; left: 50%; width: 480px; height: 480px;
+          transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
+          background: radial-gradient(circle, rgba(255,201,60,0.22) 0%, transparent 70%);
+          animation: introGlowPulse 2.4s ease-in-out infinite;
+        }
+        @keyframes introGlowPulse {
+          0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.12); }
+        }
+        .intro-splash-emblem { display: flex; align-items: flex-end; gap: 16px; position: relative; z-index: 1; }
+        .intro-icon {
+          color: var(--gold); opacity: 0; filter: drop-shadow(0 0 14px rgba(255,201,60,0.6));
+          animation: introIconDrop 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+        }
+        .intro-icon-side { color: var(--silver); filter: drop-shadow(0 0 8px rgba(200,210,220,0.4)); margin-bottom: 6px; }
+        @keyframes introIconDrop {
+          0% { opacity: 0; transform: translateY(-46px) scale(0.7); }
+          60% { opacity: 1; }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .intro-splash-title {
+          display: flex; font-family: 'Oswald', sans-serif; font-size: 34px; font-weight: 700;
+          letter-spacing: 2px; color: var(--text); position: relative; z-index: 1;
+        }
+        .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+        @keyframes introLetterDrop {
+          0% { opacity: 0; transform: translateY(-22px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .intro-splash-tagline {
+          font-size: 14px; color: var(--text-dim); opacity: 0; position: relative; z-index: 1;
+          animation: introFadeUp 0.6s ease forwards;
+        }
+        .intro-splash-skip {
+          margin-top: 18px; font-size: 12px; color: var(--text-dim); opacity: 0;
+          position: relative; z-index: 1; animation: introFadeUp 0.6s ease forwards;
+        }
+        @keyframes introFadeUp {
+          0% { opacity: 0; transform: translateY(10px); }
+          100% { opacity: 0.85; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .intro-splash, .intro-icon, .intro-letter, .intro-splash-tagline, .intro-splash-skip, .intro-splash-glow { animation: none !important; opacity: 1 !important; transform: none !important; }
+        }
 
         .paps-loading {
           display: flex; flex-direction: column; align-items: center; justify-content: center;
