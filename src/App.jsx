@@ -6515,28 +6515,44 @@ function PapsStyles({ children }) {
   return (
     <div>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
         .paps-app {
-          --ink: #0B1229;
-          --ink-2: #131B3A;
-          --panel: #1A234A;
-          --panel-2: #212C57;
-          --line: rgba(255,255,255,0.09);
-          /* 기본 강조색을 각진 경고톤 빨강 대신, 장년층 사용자도 편안하게 느끼는 차분한 파란색으로.
-             변수 이름은 기존 코드 곳곳에서 쓰여서 그대로 두고 값만 바꿨다(실제 "위험/삭제" 표시는
-             여전히 별도의 빨간색을 그대로 사용한다). */
-          --track-red: #3B7DD8;
+          /* P.A.I Studio 홈페이지와 통일한 다크 톤(무채색 베이스 + 코랄-퍼플 그라디언트 강조).
+             기존 변수 이름은 코드 곳곳(인라인 아이콘 색상 포함)에서 그대로 쓰이고 있어 값만 바꿨다.
+             실제 "위험/삭제" 표시는 이 강조색과 무관하게 여전히 별도의 빨간색을 그대로 사용한다. */
+          --bg: #0A0B0D;
+          --surface: #121418;
+          --surface-2: #1A1D22;
+          --ink: #0A0B0D;
+          --ink-2: #121418;
+          --panel: #121418;
+          --panel-2: #1A1D22;
+          --line: #22252B;
+          --line-2: #30343C;
+          --muted: #6B717B;
+          --track-red: #FF9570;
+          --accent: #FF9570;
+          --accent-2: #9E86FF;
+          --accent-hover: #FFAC8D;
+          --accent-soft: rgba(255,149,112,0.14);
+          --on-accent: #0A0B0D;
+          --grad: linear-gradient(100deg, #FF9570 0%, #E48AC4 50%, #9E86FF 100%);
           --gold: #FFC93C;
           --silver: #C9D3DC;
           --bronze: #CD8B4B;
           --teal: #2EC4B6;
-          --text: #F3F5FB;
-          --text-dim: #9AA5C7;
+          --good: #3DD68C;
+          --text: #F4F5F7;
+          --text-dim: #A3A8B1;
 
-          font-family: 'Inter', -apple-system, sans-serif;
+          --display: 'Archivo', 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+          --body: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+          --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+          font-family: var(--body);
           font-size: 15px;
-          background: radial-gradient(ellipse at top, var(--ink-2) 0%, var(--ink) 60%);
+          background: radial-gradient(ellipse at top, #15171c 0%, var(--bg) 62%);
           color: var(--text);
           min-height: 100vh;
           width: 100%;
@@ -6576,7 +6592,7 @@ function PapsStyles({ children }) {
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         .intro-splash-title {
-          display: flex; flex-wrap: wrap; justify-content: center; font-family: 'Oswald', sans-serif;
+          display: flex; flex-wrap: wrap; justify-content: center; font-family: var(--display);
           font-size: clamp(40px, 13vw, 84px); font-weight: 700; letter-spacing: clamp(1px, 0.5vw, 3px);
           color: var(--text); position: relative; z-index: 1;
         }
@@ -6612,10 +6628,10 @@ function PapsStyles({ children }) {
           border-radius: 14px; padding: 36px 30px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;
           box-shadow: 0 20px 50px rgba(0,0,0,0.35);
         }
-        .gate-card h2 { font-family: 'Oswald', sans-serif; font-size: 19px; margin: 6px 0 0; font-weight: 600; letter-spacing: 0.2px; }
+        .gate-card h2 { font-family: var(--display); font-size: 19px; margin: 6px 0 0; font-weight: 600; letter-spacing: 0.2px; }
         .gate-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 0 0 8px; }
         .gate-brand { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 4px; }
-        .gate-brand-name { font-family: 'Oswald', sans-serif; font-size: 23px; font-weight: 700; letter-spacing: 1px; color: var(--gold); }
+        .gate-brand-name { font-family: var(--display); font-size: 23px; font-weight: 700; letter-spacing: 1px; color: var(--gold); }
         .gate-tagline { font-size: 13px; color: var(--text-dim); text-align: center; margin: 0 0 8px; line-height: 1.6; }
         .gate-tagline b { color: var(--gold); font-weight: 600; }
         .gate-level-row { width: 100%; margin-bottom: 14px; text-align: center; }
@@ -6675,13 +6691,13 @@ function PapsStyles({ children }) {
         .access-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid var(--line); }
         .access-name { font-weight: 600; font-size: 13px; }
         .access-type-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,0.08); color: var(--text-dim); margin-left: 6px; vertical-align: middle; }
-        .access-type-badge.editor { background: rgba(230,57,70,0.18); color: #FF9AA5; }
+        .access-type-badge.editor { background: rgba(255,149,112,0.18); color: #FF9AA5; }
         .access-time { font-size: 11px; }
         .access-actions { display: flex; gap: 8px; }
 
         .workspace-badge {
           background: rgba(255,255,255,0.06); border: 1px solid var(--line); color: var(--text-dim);
-          border-radius: 999px; padding: 4px 10px; font-size: 11px; font-family: 'Inter', sans-serif;
+          border-radius: 999px; padding: 4px 10px; font-size: 11px; font-family: var(--body);
           font-weight: 500; cursor: pointer; letter-spacing: 0;
         }
         .workspace-badge:hover { color: var(--text); border-color: var(--text-dim); }
@@ -6695,7 +6711,7 @@ function PapsStyles({ children }) {
         .feature-update-group { margin-bottom: 16px; }
         .device-guide-caution-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
         .device-guide-caution-list li { list-style: disc; }
-        .feature-update-group h4 { font-family: 'Oswald', sans-serif; font-size: 14px; margin: 0 0 8px; color: var(--gold); }
+        .feature-update-group h4 { font-family: var(--display); font-size: 14px; margin: 0 0 8px; color: var(--gold); }
         .feature-update-group ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
         .feature-update-group li { font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 2px; }
         .feature-update-headline { font-weight: 700; color: var(--text); }
@@ -6706,7 +6722,7 @@ function PapsStyles({ children }) {
           padding: 12px 20px; border-bottom: 1px solid var(--line);
           background: rgba(255,255,255,0.02); flex-wrap: wrap;
         }
-        .brand { display: flex; align-items: center; gap: 8px; font-family: 'Oswald', sans-serif; font-weight: 600; letter-spacing: 0.3px; }
+        .brand { display: flex; align-items: center; gap: 8px; font-family: var(--display); font-weight: 600; letter-spacing: 0.3px; }
         .brand-text { font-size: 16px; }
         .tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
         .tab {
@@ -6734,7 +6750,7 @@ function PapsStyles({ children }) {
         .btn {
           display: inline-flex; align-items: center; gap: 6px; padding: 10px 17px;
           border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 600;
-          transition: transform 0.1s, opacity 0.15s; font-family: 'Inter', sans-serif;
+          transition: transform 0.1s, opacity 0.15s; font-family: var(--body);
         }
         .btn:active { transform: scale(0.97); }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -6756,7 +6772,7 @@ function PapsStyles({ children }) {
 
         /* ---------- 전광판 ---------- */
         .board-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-        .board-title { display: flex; align-items: baseline; gap: 14px; font-family: 'Oswald', sans-serif; }
+        .board-title { display: flex; align-items: baseline; gap: 14px; font-family: var(--display); }
         .board-event { font-size: 32px; font-weight: 600; letter-spacing: 0.3px; }
         .board-cat { font-size: 16px; color: var(--text-dim); font-weight: 400; }
 
@@ -6840,15 +6856,15 @@ function PapsStyles({ children }) {
         .tier-1 .podium-rank { color: var(--gold); }
         .tier-2 .podium-rank { color: var(--silver); }
         .tier-3 .podium-rank { color: var(--bronze); }
-        .podium-rank span { font-family: 'Oswald', sans-serif; font-size: 13px; font-weight: 600; }
-        .podium-name { font-family: 'Oswald', sans-serif; font-size: 22px; font-weight: 600; margin-bottom: 4px; position: relative; z-index: 1; }
+        .podium-rank span { font-family: var(--display); font-size: 13px; font-weight: 600; }
+        .podium-name { font-family: var(--display); font-size: 22px; font-weight: 600; margin-bottom: 4px; position: relative; z-index: 1; }
         .tier-1 .podium-name {
           font-size: 28px; font-weight: 800; letter-spacing: 0.3px;
           background: linear-gradient(180deg, #FFF9E5, #FFD54A 60%, #B8860B);
           -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
         }
         .podium-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 12px; position: relative; z-index: 1; }
-        .podium-value { font-family: 'Oswald', sans-serif; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
+        .podium-value { font-family: var(--display); font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
         .tier-1 .podium-value { font-size: 34px; font-weight: 800; color: #FFD54A; text-shadow: 0 0 18px rgba(255,213,74,0.55); }
 
         .rank-list { display: flex; flex-direction: column; gap: 6px; max-width: 760px; margin: 0 auto; }
@@ -6856,15 +6872,15 @@ function PapsStyles({ children }) {
         /* 전체 화면 랭킹모드 */
         .overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
         .overview-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
-        .overview-card-head { font-family: 'Oswald', sans-serif; font-size: 15px; font-weight: 700; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+        .overview-card-head { font-family: var(--display); font-size: 15px; font-weight: 700; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
         .overview-list { display: flex; flex-direction: column; gap: 6px; }
         .overview-row { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 8px; }
-        .overview-rank { font-family: 'Oswald', sans-serif; font-weight: 800; font-size: 13px; color: var(--text-dim); text-align: center; }
+        .overview-rank { font-family: var(--display); font-weight: 800; font-size: 13px; color: var(--text-dim); text-align: center; }
         .overview-rank.r1 { color: var(--gold); font-size: 15px; }
         .overview-rank.r2 { color: var(--silver); }
         .overview-rank.r3 { color: var(--bronze); }
         .overview-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .overview-value { font-family: 'Oswald', sans-serif; font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+        .overview-value { font-family: var(--display); font-size: 13px; color: var(--text-dim); white-space: nowrap; }
         .overview-row:has(.overview-rank.r1) .overview-value { color: var(--gold); font-weight: 700; }
         .overview-empty { font-size: 12px; color: var(--text-dim); padding: 8px 0; }
         .overview-foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-dim); text-align: right; }
@@ -6872,16 +6888,16 @@ function PapsStyles({ children }) {
           display: grid; grid-template-columns: 28px 1fr auto auto 90px; align-items: center; gap: 10px;
           padding: 8px 14px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid var(--line);
         }
-        .rank-num { font-family: 'Oswald', sans-serif; color: var(--text-dim); font-size: 14px; text-align: center; }
+        .rank-num { font-family: var(--display); color: var(--text-dim); font-size: 14px; text-align: center; }
         .rank-name { font-weight: 600; font-size: 14px; }
         .rank-meta { font-size: 11px; color: var(--text-dim); }
-        .rank-value { font-family: 'Oswald', sans-serif; font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; }
+        .rank-value { font-family: var(--display); font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; }
         .board-foot { text-align: center; margin-top: 14px; font-size: 11px; color: var(--text-dim); }
 
         .grade-dot {
           display: inline-flex; align-items: center; justify-content: center;
-          width: 26px; height: 26px; border-radius: 50%; color: #10162E; font-weight: 700; font-size: 13px;
-          font-family: 'Oswald', sans-serif;
+          width: 26px; height: 26px; border-radius: 50%; color: var(--bg); font-weight: 700; font-size: 13px;
+          font-family: var(--display);
         }
         .grade-dot.small { width: 20px; height: 20px; font-size: 11px; }
         .bmi-cat-dot { width: auto !important; height: auto !important; border-radius: 999px !important; padding: 3px 10px; background: rgba(255,255,255,0.08); color: var(--text) !important; font-weight: 600; }
@@ -6889,7 +6905,7 @@ function PapsStyles({ children }) {
 
         /* ---------- 공통 패널/폼 ---------- */
         .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
-        .panel h3 { margin: 0 0 14px 0; padding-left: 10px; border-left: 3px solid var(--gold); font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; }
+        .panel h3 { margin: 0 0 14px 0; padding-left: 10px; border-left: 3px solid var(--gold); font-family: var(--display); font-size: 16px; font-weight: 600; }
         .panel-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
         .entry-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
         @media (max-width: 860px) { .entry-layout { grid-template-columns: 1fr; } }
@@ -6905,19 +6921,19 @@ function PapsStyles({ children }) {
           background: var(--ink-2); color: var(--text); font-size: 14px; font-family: inherit;
         }
         .input:focus, .select:focus, .textarea:focus { outline: 2px solid var(--track-red); outline-offset: 1px; }
-        .big-input { font-size: 22px; padding: 14px; text-align: center; font-family: 'Oswald', sans-serif; }
-        .textarea { resize: vertical; font-family: 'Menlo', monospace; font-size: 12px; margin-bottom: 10px; }
+        .big-input { font-size: 22px; padding: 14px; text-align: center; font-family: var(--display); }
+        .textarea { resize: vertical; font-family: var(--mono); font-size: 12px; margin-bottom: 10px; }
 
         .existing-note { font-size: 12px; color: var(--gold); margin-bottom: 10px; }
         .current-student-card { margin-top: 16px; padding: 12px 14px; background: rgba(255,255,255,0.04); border-radius: 10px; text-align: center; }
-        .cs-name { font-family: 'Oswald', sans-serif; font-size: 18px; font-weight: 600; }
+        .cs-name { font-family: var(--display); font-size: 18px; font-weight: 600; }
         .cs-meta { font-size: 12px; color: var(--text-dim); }
 
         .recent-list { display: flex; flex-direction: column; gap: 6px; }
         .recent-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 13px; }
         .recent-name { font-weight: 600; }
         .recent-event { color: var(--text-dim); }
-        .recent-value { font-family: 'Oswald', sans-serif; font-variant-numeric: tabular-nums; }
+        .recent-value { font-family: var(--display); font-variant-numeric: tabular-nums; }
 
         .divider { height: 1px; background: var(--line); margin: 18px 0; }
         .small-note { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
@@ -6975,7 +6991,7 @@ function PapsStyles({ children }) {
           color: var(--text-dim); transition: border-color 0.15s, background 0.15s; margin-bottom: 4px;
         }
         .dropzone:hover { border-color: var(--text-dim); }
-        .dropzone.drag-over { border-color: var(--track-red); background: rgba(230,57,70,0.08); color: var(--text); }
+        .dropzone.drag-over { border-color: var(--track-red); background: rgba(255,149,112,0.08); color: var(--text); }
         .dropzone-text { font-size: 13px; font-weight: 500; }
         .visually-hidden-input {
           position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -6995,7 +7011,7 @@ function PapsStyles({ children }) {
           transition: all 0.12s;
         }
         .check-chip input { width: 13px; height: 13px; accent-color: var(--track-red); cursor: pointer; }
-        .check-chip.active { border-color: var(--track-red); color: var(--text); background: rgba(230,57,70,0.1); }
+        .check-chip.active { border-color: var(--track-red); color: var(--text); background: rgba(255,149,112,0.1); }
         .bulk-entry .table-wrap { border: 1px solid var(--line); border-radius: 10px; }
         .bulk-table { border-collapse: collapse; font-size: 13px; width: 100%; }
         .bulk-table th, .bulk-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -7003,7 +7019,7 @@ function PapsStyles({ children }) {
         .bulk-table tr:last-child td { border-bottom: none; }
         .sticky-col { position: sticky; left: 0; background: var(--panel); z-index: 1; }
         .bulk-table th.sticky-col { z-index: 2; }
-        .bulk-cell-input { width: 78px; padding: 6px 8px; text-align: center; font-family: 'Oswald', sans-serif; }
+        .bulk-cell-input { width: 78px; padding: 6px 8px; text-align: center; font-family: var(--display); }
         .bulk-hint { margin-top: 10px; }
         .grade-table { width: 100%; border-collapse: collapse; font-size: 15px; }
         .grade-table th { text-align: left; padding: 10px 12px; color: var(--text-dim); font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -7024,14 +7040,14 @@ function PapsStyles({ children }) {
         .band-table { margin-bottom: 14px; }
         .band-head-row, .band-row { display: grid; grid-template-columns: 50px 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
         .band-head-row { font-size: 11px; color: var(--text-dim); font-weight: 600; }
-        .band-static { font-size: 13px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; text-align: center; font-family: 'Oswald', sans-serif; }
+        .band-static { font-size: 13px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; text-align: center; font-family: var(--display); }
         .pw-row { display: flex; gap: 8px; }
         .school-save-btn { flex-shrink: 0; display: flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
-        .school-save-btn.pending { box-shadow: 0 0 0 3px rgba(230,57,70,0.35); animation: saveBtnPulse 1.4s ease-in-out infinite; }
+        .school-save-btn.pending { box-shadow: 0 0 0 3px rgba(255,149,112,0.35); animation: saveBtnPulse 1.4s ease-in-out infinite; }
         .school-save-btn:disabled { opacity: 0.4; box-shadow: none; animation: none; }
         @keyframes saveBtnPulse {
-          0%, 100% { box-shadow: 0 0 0 3px rgba(230,57,70,0.35); }
-          50% { box-shadow: 0 0 0 6px rgba(230,57,70,0.15); }
+          0%, 100% { box-shadow: 0 0 0 3px rgba(255,149,112,0.35); }
+          50% { box-shadow: 0 0 0 6px rgba(255,149,112,0.15); }
         }
         .pw-row .input { flex: 1; }
 
@@ -7086,8 +7102,8 @@ function PapsStyles({ children }) {
         .situp-audio-btn { font-size: 17px; padding: 16px 32px; margin-top: 6px; }
         .situp-audio-btn.playing { background: var(--track-red); animation: situpPulse 1.4s ease-in-out infinite; }
         @keyframes situpPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(230,57,70,0.5); }
-          50% { box-shadow: 0 0 0 10px rgba(230,57,70,0); }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,149,112,0.5); }
+          50% { box-shadow: 0 0 0 10px rgba(255,149,112,0); }
         }
         .situp-audio-error { width: 100%; max-width: 420px; margin-top: 6px; text-align: left; }
         .situp-count-display { display: flex; flex-direction: column; align-items: center; margin: 6px 0; }
@@ -7097,7 +7113,7 @@ function PapsStyles({ children }) {
           border: 1px solid var(--line); border-left: 3px solid var(--cat-color, var(--text-dim));
         }
         .category-label {
-          font-size: 11px; font-weight: 800; letter-spacing: 0.3px; color: #10162E;
+          font-size: 11px; font-weight: 800; letter-spacing: 0.3px; color: var(--bg);
           padding: 4px 10px; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
         }
         .drill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -7109,8 +7125,8 @@ function PapsStyles({ children }) {
         }
         .drill-chip:hover { border-color: var(--text-dim); color: var(--text); background: rgba(255,255,255,0.09); transform: translateY(-1px); box-shadow: 0 3px 0 rgba(0,0,0,0.25), 0 2px 5px rgba(0,0,0,0.25); }
         .drill-chip:active { transform: translateY(1px); box-shadow: 0 0 0 rgba(0,0,0,0.25); }
-        .drill-chip.active { border-color: var(--track-red); background: rgba(230,57,70,0.16); color: var(--text); box-shadow: 0 2px 0 rgba(150,30,40,0.4), 0 1px 3px rgba(0,0,0,0.2); }
-        .drill-count { font-size: 11px; font-family: 'Oswald', sans-serif; color: var(--text-dim); background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 999px; }
+        .drill-chip.active { border-color: var(--track-red); background: rgba(255,149,112,0.16); color: var(--text); box-shadow: 0 2px 0 rgba(150,30,40,0.4), 0 1px 3px rgba(0,0,0,0.2); }
+        .drill-count { font-size: 11px; font-family: var(--display); color: var(--text-dim); background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 999px; }
         .drill-chip.active .drill-count { color: var(--text); }
         .drill-students { display: flex; flex-direction: column; gap: 6px; }
         .drill-student-row { display: grid; grid-template-columns: 1fr 90px 20px; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; }
@@ -7126,14 +7142,14 @@ function PapsStyles({ children }) {
         .flex-score-btn {
           width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line);
           background: rgba(255,255,255,0.04); color: var(--text-dim); font-size: 12px; font-weight: 700;
-          cursor: pointer; font-family: 'Oswald', sans-serif;
+          cursor: pointer; font-family: var(--display);
         }
         .flex-score-btn.active { background: var(--track-red); border-color: var(--track-red); color: #fff; }
         .grip-result-col { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
         .drill-ref-note { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
         .drill-best {
           font-size: 12px; color: var(--text-dim); white-space: nowrap; text-align: right;
-          font-family: 'Oswald', sans-serif;
+          font-family: var(--display);
         }
         .drill-best.has-value {
           font-size: 14px; font-weight: 800; color: var(--gold); letter-spacing: 0.2px;
@@ -7169,7 +7185,7 @@ function PapsStyles({ children }) {
           .drill-student-row.step-test-row .drill-best { grid-column: 1 / -1; text-align: left; }
         }
         .drill-student-name { font-size: 13px; font-weight: 600; }
-        .drill-student-input { text-align: center; font-family: 'Oswald', sans-serif; padding: 6px 8px; }
+        .drill-student-input { text-align: center; font-family: var(--display); padding: 6px 8px; }
         .drill-panel-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
         .drill-panel-head h3 { margin: 0; }
         .mask-toggle-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -7199,7 +7215,7 @@ function PapsStyles({ children }) {
 
 
         .fiftym-group { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-        .fiftym-clock { font-family: 'Oswald', sans-serif; font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .fiftym-clock { font-family: var(--display); font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
         .fiftym-controls { display: flex; gap: 10px; }
 
         /* 오래달리기-걷기 반 전체 타이머 */
@@ -7208,13 +7224,13 @@ function PapsStyles({ children }) {
         /* 오래달리기-걷기 운동장 코스 계산기 */
         .track-calc-inputs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 10px 0; }
         .track-calc-summary { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-dim); margin: 10px 0; padding: 10px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; }
-        .track-calc-summary b { color: var(--text); font-family: 'Oswald', sans-serif; }
+        .track-calc-summary b { color: var(--text); font-family: var(--display); }
         .track-calc-diagram-wrap { display: flex; justify-content: center; margin: 14px 0; }
         .track-calc-svg { width: 100%; max-width: 340px; height: auto; }
         .track-calc-results { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
         .track-calc-result-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 13px; }
         .track-calc-result-label { color: var(--text-dim); }
-        .track-calc-result-value { font-weight: 700; font-family: 'Oswald', sans-serif; }
+        .track-calc-result-value { font-weight: 700; font-family: var(--display); }
         @media (max-width: 600px) {
           .track-calc-inputs { grid-template-columns: 1fr; }
         }
@@ -7223,7 +7239,7 @@ function PapsStyles({ children }) {
           display: flex; flex-direction: column; align-items: center; gap: 10px;
           background: var(--panel); padding: 10px 0 14px; border-bottom: 1px solid var(--line);
         }
-        .class-run-clock { font-family: 'Oswald', sans-serif; font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .class-run-clock { font-family: var(--display); font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
         .class-run-controls { display: flex; gap: 10px; }
         .class-run-progress { font-size: 13px; color: var(--text-dim); }
         .class-run-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; align-items: start; }
@@ -7234,7 +7250,7 @@ function PapsStyles({ children }) {
           background: rgba(255,255,255,0.05); color: var(--text); font-size: 12px; font-weight: 600;
           cursor: pointer; transition: all 0.1s;
         }
-        .class-run-btn:hover:not(:disabled) { background: rgba(230,57,70,0.2); border-color: var(--track-red); transform: translateY(-1px); }
+        .class-run-btn:hover:not(:disabled) { background: rgba(255,149,112,0.2); border-color: var(--track-red); transform: translateY(-1px); }
         .class-run-btn:active:not(:disabled) { transform: scale(0.96); }
         .class-run-btn:disabled { opacity: 0.3; cursor: not-allowed; }
         .class-run-finished-list { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; padding-right: 4px; }
@@ -7243,29 +7259,29 @@ function PapsStyles({ children }) {
           padding: 6px 8px; background: rgba(127,217,138,0.08); border-radius: 6px;
         }
         .class-run-finished-name { font-size: 12px; font-weight: 600; }
-        .class-run-time-input { text-align: center; font-family: 'Oswald', sans-serif; font-size: 12px; padding: 4px; }
+        .class-run-time-input { text-align: center; font-family: var(--display); font-size: 12px; padding: 4px; }
         @media (max-width: 700px) {
           .class-run-lists { grid-template-columns: 1fr; }
         }
         .fiftym-count-row { display: flex; align-items: center; gap: 10px; }
         .fiftym-count-label { font-size: 12px; color: var(--text-dim); }
-        .fiftym-count-value { font-family: 'Oswald', sans-serif; font-size: 15px; min-width: 32px; text-align: center; }
+        .fiftym-count-value { font-family: var(--display); font-size: 15px; min-width: 32px; text-align: center; }
         .fiftym-count-btn {
           width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line);
           background: rgba(255,255,255,0.06); color: var(--text); font-size: 20px; font-weight: 700;
           line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
         }
-        .fiftym-count-btn:hover:not(:disabled) { background: rgba(230,57,70,0.18); border-color: var(--track-red); }
+        .fiftym-count-btn:hover:not(:disabled) { background: rgba(255,149,112,0.18); border-color: var(--track-red); }
         .fiftym-count-btn:disabled { opacity: 0.35; cursor: not-allowed; }
         .fiftym-slots { width: 100%; display: flex; flex-direction: column; gap: 8px; }
         .fiftym-slot { display: grid; grid-template-columns: 40px 1fr 92px 70px; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; }
         .fiftym-picker { display: flex; gap: 4px; min-width: 0; }
         .fiftym-picker .select { min-width: 0; flex: 1; padding: 6px 4px; font-size: 12px; }
-        .fiftym-slot-time-input { text-align: center; font-family: 'Oswald', sans-serif; }
+        .fiftym-slot-time-input { text-align: center; font-family: var(--display); }
         .fiftym-capture-btn {
           display: flex; align-items: center; justify-content: center; gap: 4px;
           min-height: 44px; padding: 8px 6px; border-radius: 8px; border: 2px solid var(--gold);
-          background: var(--gold); color: #1a1a1a; font-weight: 800; font-size: 14px;
+          background: var(--gold); color: var(--bg); font-weight: 800; font-size: 14px;
           cursor: pointer; transition: transform 0.1s ease; white-space: nowrap;
         }
         .fiftym-capture-btn:disabled {
@@ -7283,14 +7299,14 @@ function PapsStyles({ children }) {
           .fiftym-picker { flex-wrap: wrap; }
           .fiftym-capture-btn { min-height: 48px; font-size: 15px; }
         }
-        .fiftym-slot-num { font-family: 'Oswald', sans-serif; font-size: 13px; color: var(--text-dim); }
-        .fiftym-slot-time { font-family: 'Oswald', sans-serif; font-size: 15px; text-align: right; font-variant-numeric: tabular-nums; }
+        .fiftym-slot-num { font-family: var(--display); font-size: 13px; color: var(--text-dim); }
+        .fiftym-slot-time { font-family: var(--display); font-size: 15px; text-align: right; font-variant-numeric: tabular-nums; }
         .timer-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
         @media (max-width: 860px) { .timer-grid { grid-template-columns: 1fr; } }
         .timer-display { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 36px 20px; }
         .timer-display.shuttle { background: linear-gradient(180deg, rgba(255,201,60,0.08), var(--panel) 60%); }
         .timer-big-label { font-size: 13px; color: var(--text-dim); font-weight: 600; letter-spacing: 0.5px; }
-        .timer-big-number { font-family: 'Oswald', sans-serif; font-size: 72px; font-weight: 700; line-height: 1; margin: 6px 0; font-variant-numeric: tabular-nums; }
+        .timer-big-number { font-family: var(--display); font-size: 72px; font-weight: 700; line-height: 1; margin: 6px 0; font-variant-numeric: tabular-nums; }
         .timer-big-number.accent { color: var(--gold); }
         .timer-big-number.small-fit { font-size: 40px; }
         .shuttle-stats { display: flex; gap: 28px; justify-content: center; align-items: flex-end; }
@@ -7314,7 +7330,7 @@ function PapsStyles({ children }) {
         .voice-toggle:disabled { cursor: not-allowed; opacity: 0.6; }
         .voice-toggle-box {
           flex-shrink: 0; width: 17px; height: 17px; border-radius: 4px; border: 1.5px solid var(--text-dim);
-          display: flex; align-items: center; justify-content: center; color: #10162E; transition: all 0.12s;
+          display: flex; align-items: center; justify-content: center; color: var(--bg); transition: all 0.12s;
         }
         .voice-toggle.on .voice-toggle-box { background: var(--track-red); border-color: var(--track-red); color: #fff; }
 
@@ -7326,11 +7342,11 @@ function PapsStyles({ children }) {
         .mask-toggle-btn.active { background: var(--track-red); border-color: var(--track-red); color: #fff; }
         .modal-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 20px; }
         .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-        .modal-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: 'Oswald', sans-serif; font-size: 17px; }
+        .modal-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--display); font-size: 17px; }
         .share-step { display: flex; gap: 12px; margin-bottom: 14px; }
         .share-step-num {
           flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--track-red);
-          display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; font-family: 'Oswald', sans-serif;
+          display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; font-family: var(--display);
         }
         .share-step-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
         .share-step-body { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
@@ -7352,7 +7368,7 @@ function PapsStyles({ children }) {
         .backup-step { display: flex; gap: 12px; }
         .backup-step-num {
           flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--track-red);
-          display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; font-family: 'Oswald', sans-serif;
+          display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; font-family: var(--display);
         }
         .backup-step-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
         .backup-step .small-note { margin-bottom: 8px; }
@@ -7421,13 +7437,98 @@ function PapsStyles({ children }) {
           color: var(--gold);
           box-shadow: inset 0 -2px 0 var(--gold);
         }
-        .paps-app.champion .rank-num { color: var(--gold); font-family: 'Oswald', sans-serif; font-weight: 700; }
+        .paps-app.champion .rank-num { color: var(--gold); font-family: var(--display); font-weight: 700; }
         .paps-app.champion .btn-primary {
           background: linear-gradient(180deg, #FFE38A, #FFC93C 60%, #D89B12);
           color: #241a00; font-weight: 700; border: none;
         }
         .paps-app.champion .brand-text { text-shadow: 0 0 16px rgba(255,213,74,0.3); }
         .paps-app.champion .timer-big-number.accent { color: var(--gold); text-shadow: 0 0 20px rgba(255,213,74,0.4); }
+
+        /* ================= P.A.I Studio 감성 디테일 레이어 =================
+           위에서 이미 만든 클래스들의 값을 그대로 덮어써서, 어두운 무채색 배경
+           + 코랄→퍼플 그라디언트 강조 + 이탤릭 디스플레이 서체 + 모노 라벨이라는
+           P.A.I Studio 홈페이지의 감성을 SMART PAPS 전체에 입힌다. 구조(클래스명)는
+           하나도 바꾸지 않고 "톤앤매너"만 새로 입히는 레이어라, 기능에는 영향이 없다. */
+
+        .paps-app ::selection { background: var(--track-red); color: var(--on-accent); }
+        .paps-app :focus-visible { outline: 2px solid var(--track-red); outline-offset: 2px; }
+        .paps-app ::-webkit-scrollbar { width: 10px; height: 10px; }
+        .paps-app ::-webkit-scrollbar-track { background: transparent; }
+        .paps-app ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 999px; }
+        .paps-app ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+        /* 상단 바: 스크롤해도 고정, 유리질감 블러 */
+        .topnav {
+          position: sticky; top: 0; z-index: 30;
+          background: rgba(10,11,13,0.78); backdrop-filter: blur(14px) saturate(140%);
+          -webkit-backdrop-filter: blur(14px) saturate(140%);
+        }
+        .brand { font-style: italic; font-weight: 900; letter-spacing: -0.01em; }
+        .tab.active { position: relative; }
+        .tab.active::after {
+          content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px;
+          background: var(--grad); border-radius: 2px 2px 0 0;
+        }
+
+        /* 버튼: 주 강조 버튼은 그라디언트, 나머지는 톤 정리 */
+        .btn { border-radius: 10px; letter-spacing: 0; }
+        .btn-primary { background: var(--grad); color: var(--on-accent); font-weight: 700; }
+        .btn-primary:hover:not(:disabled) { filter: brightness(1.07); opacity: 1; }
+        .btn-secondary { background: var(--surface-2); border: 1px solid var(--line); }
+        .big-btn { border-radius: 12px; }
+
+        /* 칩(필터): 알약형 + 활성 시 그라디언트 */
+        .chip { border-radius: 999px; }
+        .chip.active { background: var(--grad); border-color: transparent; color: var(--on-accent); font-weight: 700; }
+        .check-chip.active { border-color: var(--track-red); background: var(--accent-soft); }
+        .drill-chip.active { border-color: var(--track-red); background: var(--accent-soft); }
+
+        /* 패널/카드: 테두리·그림자 톤 정리, 헤더는 이탤릭 디스플레이 서체 */
+        .panel { border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.35); }
+        .panel h3 {
+          font-family: var(--display); font-style: italic; font-weight: 800; letter-spacing: -0.01em;
+        }
+        .podium-card, .overview-card, .modal-panel, .rank-row {
+          border-color: var(--line);
+        }
+        .overview-card-head { font-family: var(--display); font-style: italic; font-weight: 800; }
+
+        /* 큰 숫자(타이머·전광판·클럭)는 이탤릭 900으로 더 힘 있게 */
+        .timer-big-number.huge, .board-event, .fiftym-clock, .class-run-clock,
+        .intro-splash-title, .cs-name, .closeout-title {
+          font-style: italic; font-weight: 900; letter-spacing: -0.02em;
+        }
+        .intro-splash-glow {
+          background: radial-gradient(circle, rgba(255,149,112,0.32) 0%, rgba(158,134,255,0.12) 55%, transparent 72%);
+        }
+
+        /* 작은 라벨류: 모노스페이스 + 대문자 트래킹 (값 위에 붙는 캡션) */
+        .filter-label, .timer-big-label, .checklist-title, .board-cat,
+        .preset-row span:first-child, .track-calc-result-label {
+          font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; font-size: 10.5px;
+        }
+        .bulk-table th, .grade-table th {
+          font-family: var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+        }
+
+        /* 입력 필드: 라운드·포커스 글로우 정리 */
+        .input, .select, .textarea { border-radius: 10px; }
+        .input:focus, .select:focus, .textarea:focus {
+          outline: 2px solid var(--track-red); outline-offset: 1px;
+          box-shadow: 0 0 0 4px var(--accent-soft);
+        }
+
+        /* 배지류: 모노 라벨 톤 */
+        .year-badge, .workspace-badge { font-family: var(--mono); letter-spacing: 0.04em; }
+
+        /* 안내 배너: 톤 정리(따뜻한 코랄 계열로 통일, 기존 초록 정보 배너는 유지) */
+        .toast { border-radius: 999px; }
+
+        /* 접근성: 모션 최소화 환경에서는 은은한 강조만 남기고 애니메이션 정지 */
+        @media (prefers-reduced-motion: reduce) {
+          .chip.active, .btn-primary, .podium-card.tier-1 { animation: none !important; }
+        }
 
         /* ================= 모바일 화면 전용 정리 ================= */
         @media (max-width: 680px) {
