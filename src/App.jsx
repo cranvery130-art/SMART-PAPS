@@ -10,9 +10,6 @@ import * as XLSX from "xlsx";
 import { storage } from "./storage.js";
 import { usePwaInstall } from "./pwaInstall.js";
 
-// 학기말 마감 화면의 "문의하기" 버튼이 여는 구글 폼 링크.
-const INQUIRY_FORM_URL = "https://forms.gle/hEwyNGdcMKjtMTWu8";
-
 /* ============================== 상수 정의 ============================== */
 
 const EVENTS = [
@@ -5956,9 +5953,6 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
             이 프로그램은 수시로 여유가 생길 때마다 업데이트할 예정입니다.<br />
             PAPS 측정 업무 간 많은 도움 되셨길 바랍니다.
           </p>
-          <button className="btn btn-ghost" onClick={() => window.open(INQUIRY_FORM_URL, "_blank", "noopener,noreferrer")}>
-            <Info size={14} /> 문의하기
-          </button>
         </div>
       </div>
 
@@ -6160,35 +6154,21 @@ function ShuttleRunPlayer({ settings, setSettings }) {
       const schedule = computeShuttleSchedule(SHUTTLE_PRESET);
       scheduleRef.current = schedule;
       const now = ctx.currentTime + 0.15;
-      // 선생님 목소리로 "오, 사, 삼, 이, 일" 카운트다운 (목소리 클립이 없으면 신호음으로 대체)
-      const countdownKeys = ["countdown_5", "countdown_4", "countdown_3", "countdown_2", "countdown_1"];
-      countdownKeys.forEach((key, i) => {
-        const buf = voices[key];
-        if (buf) playBufferAt(ctx, buf, now + i);
-        else beepAt(ctx, now + i, 440, 0.15, 0.35);
-      });
-      const goTime = now + 5;
-      // "시작" 목소리 (없으면 기존 신호음으로 대체)
-      if (voices.countdown_go) playBufferAt(ctx, voices.countdown_go, goTime);
-      else beepAt(ctx, goTime, 1046, 0.25, 0.5);
-      // "시작" 목소리와 동시에 부저음도 함께 재생
-      if (startBuzzerRef.current) playBufferAt(ctx, startBuzzerRef.current, goTime);
 
-      // 배경음악: "시작" 신호와 동시에 재생을 시작해 자연스럽게 페이드인되고,
-      // 이음매 없이(28.5초 구간을 크로스페이드로 이어붙인 음원) 계속 반복재생된다.
-      const BG_MUSIC_BASE_VOL = 0.5;
-      const BG_MUSIC_DUCK_VOL = 0.12;
-      const BG_MUSIC_FADE_IN = 0.6;
+      // 배경음악: 카운트다운이 시작되는 시점부터 곧바로 재생을 시작하고, 페이드인 없이
+      // 처음부터 충분히 크게 들리도록 기준 음량으로 바로 재생한다. 이음매 없이(28.5초
+      // 구간을 크로스페이드로 이어붙인 음원) 계속 반복재생된다.
+      const BG_MUSIC_BASE_VOL = 0.7;
+      const BG_MUSIC_DUCK_VOL = 0.15;
       const bgGain = ctx.createGain();
-      bgGain.gain.setValueAtTime(0, goTime);
       bgGain.connect(ctx.destination);
       if (bgMusicBufferRef.current) {
         const bgSrc = ctx.createBufferSource();
         bgSrc.buffer = bgMusicBufferRef.current;
         bgSrc.loop = true;
         bgSrc.connect(bgGain);
-        bgSrc.start(goTime);
-        bgGain.gain.linearRampToValueAtTime(BG_MUSIC_BASE_VOL, goTime + BG_MUSIC_FADE_IN);
+        bgGain.gain.setValueAtTime(BG_MUSIC_BASE_VOL, now);
+        bgSrc.start(now);
       }
       // 단계 안내, 카운트, 목소리가 나올 때 배경음악 음량을 잠시 자연스럽게 줄였다가
       // (덕킹) 신호가 끝나면 다시 원래 음량으로 복귀시킨다.
@@ -6196,12 +6176,29 @@ function ShuttleRunPlayer({ settings, setSettings }) {
         if (!bgMusicBufferRef.current) return;
         const attack = 0.08, release = 0.3;
         const safeDur = Math.max(dur, 0.05);
-        const duckStart = Math.max(goTime + BG_MUSIC_FADE_IN, time - attack);
+        const duckStart = Math.max(now, time - attack);
         bgGain.gain.setValueAtTime(BG_MUSIC_BASE_VOL, duckStart);
         bgGain.gain.linearRampToValueAtTime(BG_MUSIC_DUCK_VOL, time);
         bgGain.gain.setValueAtTime(BG_MUSIC_DUCK_VOL, time + safeDur);
         bgGain.gain.linearRampToValueAtTime(BG_MUSIC_BASE_VOL, time + safeDur + release);
       }
+
+      // 선생님 목소리로 "오, 사, 삼, 이, 일" 카운트다운 (목소리 클립이 없으면 신호음으로 대체)
+      const countdownKeys = ["countdown_5", "countdown_4", "countdown_3", "countdown_2", "countdown_1"];
+      countdownKeys.forEach((key, i) => {
+        const buf = voices[key];
+        const t = now + i;
+        if (buf) playBufferAt(ctx, buf, t);
+        else beepAt(ctx, t, 440, 0.15, 0.35);
+        duckBgMusic(t, buf ? buf.duration : 0.15);
+      });
+      const goTime = now + 5;
+      // "시작" 목소리 (없으면 기존 신호음으로 대체)
+      if (voices.countdown_go) playBufferAt(ctx, voices.countdown_go, goTime);
+      else beepAt(ctx, goTime, 1046, 0.25, 0.5);
+      // "시작" 목소리와 동시에 부저음도 함께 재생
+      if (startBuzzerRef.current) playBufferAt(ctx, startBuzzerRef.current, goTime);
+      duckBgMusic(goTime, Math.max(voices.countdown_go ? voices.countdown_go.duration : 0.25, startBuzzerRef.current ? startBuzzerRef.current.duration : 0));
 
       // 1단계 안내 목소리는 실제 스케줄상 1바퀴를 다 돈 뒤(약 9초 후)가 아니라
       // "시작" 신호 직후 바로 이어서 재생한다. 그렇지 않으면 학생 입장에서
