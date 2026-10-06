@@ -666,13 +666,18 @@ async function clearDeviceRole(code) {
 /* ============================== 메인 앱 ============================== */
 
 const SCREEN_MODE_KEY = "smartpaps_screen_mode";
+// 화면 모드: 기본(어두운 화면) 외에 눈 보호용 두 가지를 둔다.
+//  - paper: 밝은 곳(교실·체육관·운동장 스마트폰)에서 쓰는 따뜻한 종이색 화면
+//  - night: 어두운 곳·저녁에 쓰는, 밝기와 푸른빛을 크게 낮춘 화면
 const SCREEN_MODES = [
   { id: "default", label: "기본 모드" },
-  { id: "comfort", label: "눈 편한 모드" },
+  { id: "paper", label: "눈 보호 · 종이" },
+  { id: "night", label: "눈 보호 · 야간" },
 ];
 function readScreenMode() {
   try {
-    const v = window.localStorage.getItem(SCREEN_MODE_KEY);
+    let v = window.localStorage.getItem(SCREEN_MODE_KEY);
+    if (v === "comfort") v = "night"; // 직전 버전 이름 호환
     if (SCREEN_MODES.some(m => m.id === v)) return v;
   } catch (e) {}
   return "default";
@@ -680,12 +685,15 @@ function readScreenMode() {
 
 export default function PapsApp({ initialWorkspaceCode = null, forcePresentation = false } = {}) {
   const [workspaceCode, setWorkspaceCode] = useState(initialWorkspaceCode);
-  // 화면 모드(기본 / 눈 편한 모드)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
+  // 화면 모드(기본 / 눈 보호 · 종이 / 눈 보호 · 야간)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
   // 아니라 "이 기기"에만 저장한다. 그래서 개설자·동료 교사 누구나 각자 바꿀 수 있고, 첫 화면과
   // 같은 기기에서 연 빔프로젝터 새 창에도 똑같이 적용된다.
   const [screenMode, setScreenMode] = useState(readScreenMode);
   useEffect(() => {
-    document.documentElement.setAttribute("data-screen-mode", screenMode);
+    const root = document.documentElement;
+    root.setAttribute("data-screen-mode", screenMode);
+    if (screenMode === "default") root.removeAttribute("data-eye-care");
+    else root.setAttribute("data-eye-care", "on");
   }, [screenMode]);
   function changeScreenMode(next) {
     setScreenMode(next);
@@ -2698,7 +2706,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           <span className="now-text">{nowText}</span>
         </div>
         {onChangeScreenMode && (
-          <label className={"screen-mode-select" + (screenMode === "comfort" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용됩니다">
+          <label className={"screen-mode-select" + (screenMode !== "default" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용됩니다">
             <Eye size={14} />
             <select value={screenMode} onChange={e => onChangeScreenMode(e.target.value)} aria-label="화면 모드 선택">
               {SCREEN_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -7700,75 +7708,146 @@ function PapsStyles({ children }) {
           .nav-right .screen-mode-select { flex: 1; justify-content: center; }
         }
 
-        /* ================= 눈 편한 모드 =================
-           오래 화면을 보는 선생님의 눈 피로를 줄이는 모드. 원칙은 네 가지:
-           1) 순수 검정 배경 + 새하얀 글자처럼 지나치게 강한 대비를 피하고, 따뜻한 중간 톤으로
-              대비를 한 단계 낮춘다(본문 대비 약 11:1 — 여전히 충분히 또렷함).
-           2) 푸른빛을 줄인 따뜻한 색온도(미색 글자 + 은은한 호박색 강조).
-           3) 채도 높은 무지개 그라디언트·빛번짐(글로우)·반짝이는 애니메이션을 없앤다.
-           4) 기울임꼴 장식 서체를 똑바로 세우고, 작은 글자는 조금 키우고 줄 간격을 넓힌다.
+        /* ================= 눈 보호 모드 (공통) =================
+           두 눈 보호 모드에 똑같이 적용되는 원칙:
+           - 무지개 그라디언트·빛번짐(글로우)·반짝임·흔들리는 애니메이션을 모두 없앤다
+           - 기울임꼴 장식 서체를 바로 세우고, 작은 글자를 키우고, 줄 간격을 넓힌다
+           - 강조색은 한 가지만, 채도를 낮춰서 쓴다
            실제 위험·삭제 표시는 지금처럼 별도의 빨간색을 그대로 쓴다. */
-        html[data-screen-mode="comfort"] .paps-app,
-        html[data-screen-mode="comfort"] .modal-backdrop {
-          --bg: #1E1C19;
-          --surface: #26231F;
-          --surface-2: #2E2A25;
-          --ink: #1E1C19;
-          --ink-2: #26231F;
-          --panel: #26231F;
-          --panel-2: #2E2A25;
-          --line: #3A352E;
-          --line-2: #4A443B;
-          --muted: #8C8477;
-          --track-red: #D9A46A;
-          --accent: #D9A46A;
-          --accent-2: #A9B79A;
-          --accent-hover: #E3B57F;
-          --accent-soft: rgba(217,164,106,0.16);
-          --on-accent: #1E1C19;
-          --grad: linear-gradient(100deg, #D9A46A 0%, #CDA67D 100%);
-          --gold: #E0B45E;
-          --silver: #C8C2B6;
-          --bronze: #C08A5A;
-          --teal: #8FB5A6;
-          --good: #9CC48E;
-          --text: #E8E1D5;
-          --text-dim: #ADA595;
+        html[data-eye-care] .paps-app { background: var(--bg); line-height: 1.7; }
+        html[data-eye-care] .paps-app *,
+        html[data-eye-care] .modal-backdrop * { text-shadow: none !important; }
+        html[data-eye-care] .paps-app *,
+        html[data-eye-care] .paps-app *::before,
+        html[data-eye-care] .paps-app *::after,
+        html[data-eye-care] .modal-backdrop * { animation-duration: 0s !important; animation-iteration-count: 1 !important; }
+        html[data-eye-care] .intro-splash-glow { display: none; }
+        html[data-eye-care] .intro-icon { filter: none; opacity: 1; }
+        html[data-eye-care] .panel,
+        html[data-eye-care] .podium-card,
+        html[data-eye-care] .overview-card { box-shadow: none; }
+        html[data-eye-care] .brand,
+        html[data-eye-care] .panel h3,
+        html[data-eye-care] .overview-card-head,
+        html[data-eye-care] .timer-big-number.huge,
+        html[data-eye-care] .board-event,
+        html[data-eye-care] .fiftym-clock,
+        html[data-eye-care] .class-run-clock,
+        html[data-eye-care] .intro-splash-title,
+        html[data-eye-care] .cs-name,
+        html[data-eye-care] .closeout-title,
+        html[data-eye-care] .modal-head h3 { font-style: normal; }
+        html[data-eye-care] .filter-label,
+        html[data-eye-care] .timer-big-label,
+        html[data-eye-care] .checklist-title,
+        html[data-eye-care] .board-cat,
+        html[data-eye-care] .preset-row span:first-child,
+        html[data-eye-care] .track-calc-result-label { font-size: 12px; letter-spacing: 0.04em; }
+        html[data-eye-care] .small-note { font-size: 13.5px; line-height: 1.75; }
+        html[data-eye-care] .chip { font-size: 13.5px; }
+
+        /* 시상대: 반짝이는 빛줄기·후광·금빛 그라디언트 글자 대신 차분한 단색으로 */
+        html[data-eye-care] .podium-shine,
+        html[data-eye-care] .podium-burst { display: none; }
+        html[data-eye-care] .podium-card.tier-1 { background: var(--panel); border: 2px solid var(--gold); box-shadow: none; }
+        html[data-eye-care] .podium-card.tier-2 { background: var(--panel); border-color: var(--silver); }
+        html[data-eye-care] .podium-card.tier-3 { background: var(--panel); border-color: var(--bronze); }
+        html[data-eye-care] .podium-trophy-icon { color: var(--gold); filter: none; }
+        html[data-eye-care] .tier-1 .podium-name {
+          background: none; -webkit-text-fill-color: currentColor; color: var(--text);
         }
-        html[data-screen-mode="comfort"] .paps-app {
-          background: var(--bg);
-          line-height: 1.65;
+        html[data-eye-care] .tier-1 .podium-value { color: var(--gold); }
+
+        /* ================= 눈 보호 · 종이 =================
+           밝은 장소용. 형광등·햇빛 아래에선 어두운 화면보다 밝은 바탕의 진한 글자가 더 편하게
+           읽힌다. 새하얀 바탕 대신 누런 종이색, 새까만 글자 대신 짙은 갈색 글자를 써서
+           눈부심과 푸른빛을 줄이고, 강조색은 눈에 편한 녹색 계열 한 가지만 쓴다. */
+        html[data-screen-mode="paper"] .paps-app,
+        html[data-screen-mode="paper"] .modal-backdrop {
+          --bg: #EFE7D6;
+          --surface: #F7F1E4;
+          --surface-2: #E8DFCB;
+          --ink: #EFE7D6;
+          --ink-2: #F7F1E4;
+          --panel: #F7F1E4;
+          --panel-2: #EBE2CF;
+          --line: #D8CCB3;
+          --line-2: #C4B699;
+          --muted: #8A7E69;
+          --track-red: #4E7D63;
+          --accent: #4E7D63;
+          --accent-2: #9A6B35;
+          --accent-hover: #3F6B53;
+          --accent-soft: rgba(78,125,99,0.14);
+          --on-accent: #FAF6EC;
+          --grad: linear-gradient(100deg, #4E7D63 0%, #4E7D63 100%);
+          --gold: #A87A1E;
+          --silver: #7D8590;
+          --bronze: #9C6236;
+          --teal: #3D7F77;
+          --good: #3F7F46;
+          --text: #3A3227;
+          --text-dim: #6A5F4E;
+          color-scheme: light;
         }
-        html[data-screen-mode="comfort"] .modal-backdrop { background: rgba(20,18,15,0.78); }
-        html[data-screen-mode="comfort"] .idle-lock-backdrop { background: rgba(20,18,15,0.97); }
-        html[data-screen-mode="comfort"] .topnav { background: rgba(30,28,25,0.94); }
-        html[data-screen-mode="comfort"] .panel { box-shadow: none; }
-        /* 빛번짐·글자 그림자·반짝임 제거 */
-        html[data-screen-mode="comfort"] .paps-app *,
-        html[data-screen-mode="comfort"] .modal-backdrop * { text-shadow: none !important; }
-        html[data-screen-mode="comfort"] .podium-card.tier-1 { animation: none !important; }
-        html[data-screen-mode="comfort"] .intro-splash-glow { animation: none; opacity: 0.35; }
-        html[data-screen-mode="comfort"] .intro-icon { filter: none; }
-        /* 기울임꼴 장식 서체를 바로 세워 읽기 편하게 */
-        html[data-screen-mode="comfort"] .brand,
-        html[data-screen-mode="comfort"] .panel h3,
-        html[data-screen-mode="comfort"] .overview-card-head,
-        html[data-screen-mode="comfort"] .timer-big-number.huge,
-        html[data-screen-mode="comfort"] .board-event,
-        html[data-screen-mode="comfort"] .fiftym-clock,
-        html[data-screen-mode="comfort"] .class-run-clock,
-        html[data-screen-mode="comfort"] .intro-splash-title,
-        html[data-screen-mode="comfort"] .cs-name,
-        html[data-screen-mode="comfort"] .closeout-title,
-        html[data-screen-mode="comfort"] .modal-head h3 { font-style: normal; }
-        /* 아주 작은 라벨은 조금 키우고 자간을 줄여 덜 빽빽하게 */
-        html[data-screen-mode="comfort"] .filter-label,
-        html[data-screen-mode="comfort"] .timer-big-label,
-        html[data-screen-mode="comfort"] .checklist-title,
-        html[data-screen-mode="comfort"] .board-cat,
-        html[data-screen-mode="comfort"] .preset-row span:first-child,
-        html[data-screen-mode="comfort"] .track-calc-result-label { font-size: 11.5px; letter-spacing: 0.05em; }
-        html[data-screen-mode="comfort"] .small-note { line-height: 1.7; }
+        html[data-screen-mode="paper"] .topnav { background: rgba(239,231,214,0.95); }
+        html[data-screen-mode="paper"] .modal-backdrop { background: rgba(58,50,39,0.35); }
+        html[data-screen-mode="paper"] .idle-lock-backdrop { background: rgba(239,231,214,0.98); }
+        html[data-screen-mode="paper"] .paps-app ::-webkit-scrollbar-thumb { background: #C4B699; }
+        /* 어두운 배경을 전제로 밝은 색을 직접 지정해 둔 안내 문구들을 종이 바탕에서도 읽히게 */
+        html[data-screen-mode="paper"] .info-banner { color: #2F6B63; background: rgba(61,127,119,0.12); }
+        html[data-screen-mode="paper"] .warn-banner { color: #8E3530; background: rgba(176,64,56,0.1); }
+        html[data-screen-mode="paper"] .warn-note { color: #7A5512; background: rgba(168,122,30,0.12); }
+        html[data-screen-mode="paper"] .warn-note.official-note { color: #3F6E44; background: rgba(63,127,70,0.1); }
+        html[data-screen-mode="paper"] .closeout-confirm-warn { color: #7A5512; }
+        html[data-screen-mode="paper"] .closeout-backup-done { color: #3F6E44; }
+        html[data-screen-mode="paper"] .access-type-badge.editor { color: #8E4A2E; background: rgba(156,98,54,0.14); }
+        html[data-screen-mode="paper"] .gate-error,
+        html[data-screen-mode="paper"] .tab-danger,
+        html[data-screen-mode="paper"] .closeout-title,
+        html[data-screen-mode="paper"] .closeout-confirm-big { color: #B03A34; }
+        html[data-screen-mode="paper"] .tab-danger:hover,
+        html[data-screen-mode="paper"] .tab-danger.active { color: #9A2F2A; }
+
+        /* ================= 눈 보호 · 야간 =================
+           어두운 장소·저녁용. 기본 모드보다 전체 밝기를 크게 낮추고(글자 밝기 약 70%),
+           푸른빛을 거의 뺀 호박색 계열로 바꿔, 어두운 방에서 화면이 눈을 찌르지 않게 한다. */
+        html[data-screen-mode="night"] .paps-app,
+        html[data-screen-mode="night"] .modal-backdrop {
+          --bg: #171411;
+          --surface: #1F1B16;
+          --surface-2: #27221C;
+          --ink: #171411;
+          --ink-2: #1F1B16;
+          --panel: #1F1B16;
+          --panel-2: #27221C;
+          --line: #332C24;
+          --line-2: #433A2F;
+          --muted: #7D705E;
+          --track-red: #C08A4E;
+          --accent: #C08A4E;
+          --accent-2: #9C8F6A;
+          --accent-hover: #CC9862;
+          --accent-soft: rgba(192,138,78,0.15);
+          --on-accent: #171411;
+          --grad: linear-gradient(100deg, #C08A4E 0%, #C08A4E 100%);
+          --gold: #C9A055;
+          --silver: #A8A090;
+          --bronze: #A97A50;
+          --teal: #7F9C8E;
+          --good: #8DAA78;
+          --text: #CDBFA8;
+          --text-dim: #93866F;
+        }
+        html[data-screen-mode="night"] .topnav { background: rgba(23,20,17,0.96); }
+        html[data-screen-mode="night"] .modal-backdrop { background: rgba(10,8,6,0.8); }
+        html[data-screen-mode="night"] .idle-lock-backdrop { background: rgba(10,8,6,0.98); }
+        html[data-screen-mode="night"] .info-banner { color: #A9BFB4; background: rgba(127,156,142,0.1); }
+        html[data-screen-mode="night"] .warn-banner { color: #D9A39B; }
+        html[data-screen-mode="night"] .warn-note { color: #D2B37C; background: rgba(201,160,85,0.08); }
+        html[data-screen-mode="night"] .warn-note.official-note,
+        html[data-screen-mode="night"] .closeout-backup-done { color: #A7BC94; }
+        html[data-screen-mode="night"] .closeout-confirm-warn { color: #D2B37C; }
 
         /* ================= P.A.I Studio 감성 디테일 레이어 =================
            위에서 이미 만든 클래스들의 값을 그대로 덮어써서, 어두운 무채색 배경
