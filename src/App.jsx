@@ -1908,14 +1908,22 @@ function IntroSplash({ onDone }) {
         <Award size={64} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
       </div>
       <div className="intro-splash-title" aria-label={title}>
-        {title.split("").map((ch, i) => (
-          <span key={i} className="intro-letter" style={{ animationDelay: (0.42 + i * 0.045) + "s" }}>
-            {ch === " " ? " " : ch}
-          </span>
-        ))}
+        {/* 글자를 단어 단위로 묶어서, 화면이 좁아도 "SMART PAP / S"처럼 단어 중간에서 줄이 바뀌지 않게 한다. */}
+        {title.split(" ").map((word, w, words) => {
+          const start = words.slice(0, w).join(" ").length + (w > 0 ? 1 : 0);
+          return (
+            <span key={w} className="intro-word">
+              {word.split("").map((ch, i) => (
+                <span key={i} className="intro-letter" style={{ animationDelay: (0.42 + (start + i) * 0.045) + "s" }}>
+                  {ch}
+                </span>
+              ))}
+            </span>
+          );
+        })}
       </div>
       <div className="intro-splash-tagline" style={{ animationDelay: "1.1s" }}>
-        측정부터 등급, 나이스 제출까지 — 한 번에
+        측정부터 등급, 나이스 제출까지 <span className="intro-nowrap">— 한 번에</span>
       </div>
     </div>
   );
@@ -6898,10 +6906,12 @@ function PapsStyles({ children }) {
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         .intro-splash-title {
-          display: flex; flex-wrap: wrap; justify-content: center; font-family: var(--display);
-          font-size: clamp(40px, 13vw, 84px); font-weight: 700; letter-spacing: clamp(1px, 0.5vw, 3px);
-          color: var(--text); position: relative; z-index: 1;
+          display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.28em; row-gap: 0.04em;
+          font-family: var(--display); line-height: 1.05;
+          font-size: clamp(32px, 11vw, 84px); font-weight: 700; letter-spacing: clamp(1px, 0.5vw, 3px);
+          color: var(--text); position: relative; z-index: 1; max-width: 100%;
         }
+        .intro-word { display: inline-flex; white-space: nowrap; }
         .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
         @keyframes introLetterDrop {
           0% { opacity: 0; transform: translateY(-22px); }
@@ -6909,8 +6919,10 @@ function PapsStyles({ children }) {
         }
         .intro-splash-tagline {
           font-size: clamp(14px, 4vw, 20px); color: var(--text-dim); opacity: 0; position: relative; z-index: 1;
+          line-height: 1.5; word-break: keep-all; text-wrap: balance; max-width: 28em;
           animation: introFadeUp 0.6s ease forwards;
         }
+        .intro-nowrap { white-space: nowrap; }
         @keyframes introFadeUp {
           0% { opacity: 0; transform: translateY(10px); }
           100% { opacity: 0.85; transform: translateY(0); }
