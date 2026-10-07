@@ -5,10 +5,16 @@ import {
   ClipboardList, Monitor, X, Maximize2, Minimize2, AlertTriangle,
   CheckCircle2, XCircle, Info, Play,
   RotateCcw, Square, Smartphone, Copy,
-  FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff, Flag
+  FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff, Flag,
+  BookOpen, PlayCircle, LogOut
 } from "lucide-react";
 import * as XLSX from "xlsx";
-import { storage } from "./storage.js";
+import { storage, PRACTICE_CODE, clearPracticeStore } from "./storage.js";
+import {
+  PRACTICE_SCHOOL_NAME, PRACTICE_VIEWER_PASSWORD, PRACTICE_FOUNDER_PASSWORD,
+  makePracticeStudents, makePracticeRecords, makePracticeAccessList,
+} from "./practice.js";
+import { GuidePanel, GuideModal } from "./Guide.jsx";
 import { usePwaInstall } from "./pwaInstall.js";
 
 /* ============================== 상수 정의 ============================== */
@@ -593,6 +599,8 @@ async function loadSavedWorkspaceCode() {
   }
 }
 async function saveWorkspaceCodeRemote(code) {
+  // 연습모드 코드를 기억해 두면 다음에 앱을 열 때 실제 학교 대신 연습모드로 들어가 버린다.
+  if (code === PRACTICE_CODE) return true;
   try {
     await storage.set(WORKSPACE_CODE_KEY, code, false);
     return true;
@@ -663,6 +671,27 @@ async function clearDeviceRole(code) {
   }
 }
 
+/* ============================== 연습모드 ============================== */
+
+// 연습모드 데이터를 처음 상태로 새로 깐다. 저장 키가 PRACTICE_CODE로 끝나므로 storage.js가
+// 서버 대신 이 기기의 localStorage에만 저장한다(실제 학교 데이터와 절대 섞이지 않음).
+async function seedPracticeWorkspace() {
+  clearPracticeStore();
+  try { window.localStorage.removeItem(nameMapKey(PRACTICE_CODE)); } catch (e) { /* 없어도 무방 */ }
+  const students = makePracticeStudents();
+  const cfg = buildDefaultConfig("middle", PRACTICE_VIEWER_PASSWORD, PRACTICE_FOUNDER_PASSWORD);
+  cfg.students = students;
+  cfg.settings.schoolName = PRACTICE_SCHOOL_NAME;
+  cfg.createdAt = Date.now();
+  const records = makePracticeRecords(students, cfg.settings.currentYear, recKey);
+  const accessList = makePracticeAccessList();
+  await saveConfigRemote(PRACTICE_CODE, cfg);
+  await saveRecordsRemote(PRACTICE_CODE, records);
+  await saveAccessList(PRACTICE_CODE, accessList);
+  await saveDeviceRole(PRACTICE_CODE, { id: "dev_practice", role: "admin" });
+  return { cfg, records, accessList };
+}
+
 /* ============================== 메인 앱 ============================== */
 
 const SCREEN_MODE_KEY = "smartpaps_screen_mode";
@@ -683,8 +712,9 @@ function readScreenMode() {
   return "default";
 }
 
-export default function PapsApp({ initialWorkspaceCode = null, forcePresentation = false } = {}) {
+export default function PapsApp({ initialWorkspaceCode = null, forcePresentation = false, autoStartPractice = false } = {}) {
   const [workspaceCode, setWorkspaceCode] = useState(initialWorkspaceCode);
+  const isPractice = workspaceCode === PRACTICE_CODE;
   // 화면 모드(기본 / 눈 보호 · 종이 / 눈 보호 · 야간)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
   // 아니라 "이 기기"에만 저장한다. 그래서 개설자·동료 교사 누구나 각자 바꿀 수 있고, 첫 화면과
   // 같은 기기에서 연 빔프로젝터 새 창에도 똑같이 적용된다.
@@ -795,6 +825,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const IDLE_TIMEOUT_MS = 12 * 60 * 1000;
   useEffect(() => {
     if (presentation) return;
+    if (isPractice) return; // 연습모드에는 실제 학생 정보가 없으니 자동 잠금으로 흐름을 끊지 않는다
     if (role !== "admin" && role !== "viewer") return;
     if (!settings.viewerPassword) return;
 
@@ -814,7 +845,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       activityEvents.forEach(ev => window.removeEventListener(ev, markActive));
       clearInterval(timer);
     };
-  }, [role, presentation, settings.viewerPassword, workspaceCode]);
+  }, [role, presentation, settings.viewerPassword, workspaceCode, isPractice]);
 
   function handleIdleUnlockAttempt(pw) {
     if (pw && settings.viewerPassword && pw === settings.viewerPassword) {
@@ -842,6 +873,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setWorkspaceChecking(false);
         return;
       }
+      // 프로그램 안의 "연습모드 새 창으로 열기"(?practice=1)로 열린 창은 저장된 학교 코드 대신
+      // 곧바로 연습모드로 들어간다.
+      if (autoStartPractice) {
+        await seedPracticeWorkspace();
+        pendingIntentRef.current = "login";
+        setView("guide");
+        setWorkspaceCode(PRACTICE_CODE);
+        setWorkspaceChecking(false);
+        return;
+      }
       const saved = await loadSavedWorkspaceCode();
       if (saved) setWorkspaceCode(saved);
       setWorkspaceChecking(false);
@@ -865,9 +906,49 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   }
 
   function changeWorkspaceCode() {
+    if (isPractice) { endPractice(); return; }
     setWorkspaceCode(null);
     setRole(null);
     setLoading(true);
+  }
+
+  /* ---------- 연습모드 ---------- */
+  async function startPractice() {
+    await seedPracticeWorkspace();
+    pendingIntentRef.current = "login";
+    setBannerDismissed(false);
+    setView("guide");
+    setWorkspaceCode(PRACTICE_CODE);
+  }
+  // 연습하며 바꾼 내용을 버리고 처음 상태로 되돌린다(같은 코드라 화면 상태를 직접 채운다).
+  async function resetPractice() {
+    const { cfg, records: seededRecords, accessList: seededAccess } = await seedPracticeWorkspace();
+    setStudents(cfg.students);
+    setCriteria(cfg.criteria);
+    setSettings(cfg.settings);
+    setRecords(seededRecords);
+    setAccessList(seededAccess);
+    setIsFounder(true);
+    setMyDisplayName("개설자");
+    setActiveYear(cfg.settings.currentYear);
+    setPresentation(false);
+    showToast("연습모드를 처음 상태로 되돌렸습니다.", "ok");
+  }
+  function endPractice() {
+    clearPracticeStore();
+    try { window.localStorage.removeItem(nameMapKey(PRACTICE_CODE)); } catch (e) { /* 없어도 무방 */ }
+    setPresentation(false);
+    setView("board");
+    setWorkspaceCode(null);
+    setRole(null);
+    setLoading(true);
+  }
+  // 실제 학교로 접속한 상태에서는 지금 화면을 그대로 두고 연습모드를 새 창으로 연다.
+  function openPracticeWindow() {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("practice", "1");
+    window.open(url.toString(), "_blank", "noopener");
   }
 
   /* ---------- 접근 권한(역할) 확인 ---------- */
@@ -1467,7 +1548,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     // 이 기기가 "마지막으로 쓰던 코드"로 기억해 둔 값도 지운다. 그렇지 않으면 마감 직후
     // 화면은 첫 화면으로 돌아가더라도, 앱을 나갔다가 다시 열 때(특히 모바일) 이 기기가
     // 방금 지운 코드를 자동으로 다시 불러와 재접속을 시도하는 문제가 있었다.
-    await clearSavedWorkspaceCode().catch(() => {});
+    if (workspaceCode === PRACTICE_CODE) clearPracticeStore();
+    else await clearSavedWorkspaceCode().catch(() => {});
     // "백업을 받았다" 로컬 기록도 함께 지운다. 나중에 같은 코드 이름이 다시 개설되었을 때
     // 예전 백업 표시가 잘못 남아있지 않도록 한다.
     await storage.delete(closeoutBackupFlagKey(workspaceCode), false).catch(() => {});
@@ -1527,7 +1609,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   // 띄운다. 브라우저 보안 정책상 문구 자체는 각 브라우저가 정한 문구로 고정되며 직접
   // 바꿀 수는 없다.
   useEffect(() => {
-    if (role !== "admin") return;
+    if (role !== "admin" || isPractice) return;
     function handleBeforeUnload(e) {
       e.preventDefault();
       e.returnValue = "";
@@ -1535,7 +1617,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [role]);
+  }, [role, isPractice]);
 
   /* ---------- 신기록 알림 ---------- */
   useEffect(() => {
@@ -1628,7 +1710,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     return (
       <PapsStyles>
         {showIntro && <IntroSplash onDone={() => setShowIntro(false)} />}
-        <WorkspaceGate onSubmit={submitWorkspaceCode} onRequestAccess={requestAccess} initialMode={gateInitialMode} />
+        <WorkspaceGate onSubmit={submitWorkspaceCode} onRequestAccess={requestAccess} initialMode={gateInitialMode} onStartPractice={startPractice} />
       </PapsStyles>
     );
   }
@@ -1700,6 +1782,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             }}
             screenMode={screenMode}
             onChangeScreenMode={changeScreenMode}
+            isPractice={isPractice}
           />
         )}
 
@@ -1726,7 +1809,21 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           />
         )}
 
-        {!bannerDismissed && !presentation && (
+        {isPractice && !presentation && (
+          <div className="info-banner practice-banner">
+            <PlayCircle size={16} />
+            <span>
+              <b>연습모드</b> · 가짜 학생으로 체험 중입니다. 여기서 한 일은 이 기기에만 저장되고 실제 학교
+              데이터와 섞이지 않아요. 연습용 비밀번호: 접근 신청 <b>{PRACTICE_VIEWER_PASSWORD}</b> · 개설자 <b>{PRACTICE_FOUNDER_PASSWORD}</b>
+            </span>
+            <span className="practice-banner-actions">
+              <button className="btn btn-ghost small" onClick={resetPractice}><RotateCcw size={13} /> 처음 상태로</button>
+              <button className="btn btn-secondary small" onClick={endPractice}><LogOut size={13} /> 연습 끝내기</button>
+            </span>
+          </div>
+        )}
+
+        {!isPractice && !bannerDismissed && !presentation && (
           <div className="info-banner">
             <Info size={16} />
             <span>
@@ -1844,6 +1941,15 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               activeYear={activeYear}
             />
           )}
+          {view === "guide" && (
+            <GuidePanel
+              role={role}
+              isFounder={isFounder}
+              isPractice={isPractice}
+              onGo={(tab) => { setView(tab); window.scrollTo(0, 0); }}
+              onStartPractice={isPractice ? null : openPracticeWindow}
+            />
+          )}
           {view === "access" && role === "admin" && (
             <AccessRequestsPanel
               accessList={accessList}
@@ -1931,7 +2037,7 @@ function IntroSplash({ onDone }) {
 
 /* ============================== 워크스페이스 코드 설정 ============================== */
 
-function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
+function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice }) {
   const [value, setValue] = useState("");
   const [mode, setMode] = useState(initialMode || "code"); // 'code' | 'notice' | 'form'
   const [schoolLevel, setSchoolLevel] = useState("middle");
@@ -1983,9 +2089,14 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             일일이 출력, 수기 기록, 재입력 하던 업무가<br />
             <b>첨부, 모바일 기록, 마감</b>으로 끝.
           </p>
-          <button className="manual-btn" onClick={() => setManualOpen(true)}>
-            <ClipboardList size={13} /> 사용설명서
-          </button>
+          <div className="gate-help-row">
+            <button className="manual-btn" onClick={() => setManualOpen(true)}>
+              <BookOpen size={13} /> 사용 가이드
+            </button>
+            <button className="manual-btn practice-btn" onClick={onStartPractice}>
+              <PlayCircle size={13} /> 연습모드 체험
+            </button>
+          </div>
           <div className="gate-divider" />
 
           {/* "새 코드 만들기"를 제목 바로 아래(첫 화면에서 가장 먼저 보이는 위치)로 옮겨
@@ -2143,7 +2254,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           )}
 
         </div>
-        {manualOpen && <UserManualModal onClose={() => setManualOpen(false)} />}
+        {manualOpen && <GuideModal onClose={() => setManualOpen(false)} onStartPractice={() => { setManualOpen(false); onStartPractice(); }} />}
       </div>
     );
   }
@@ -2227,126 +2338,6 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
   }
 
   return null;
-}
-
-function UserManualModal({ onClose }) {
-  const [codeNoteOpen, setCodeNoteOpen] = useState(false);
-  const [mobileNoteOpen, setMobileNoteOpen] = useState(false);
-  const [nameNoteOpen, setNameNoteOpen] = useState(false);
-  const [rosterNoteOpen, setRosterNoteOpen] = useState(false);
-  const steps = [
-    { title: "시작하기", body: "첫 화면의 \"새 코드 만들기\"에서 학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호 두 개도 함께 정해주세요. \"개설자 전용 비밀번호\"는 다른 기기에서 개설자로 로그인할 때, \"접근 신청 비밀번호\"는 동료 교사가 접근 신청할 때 씁니다. 만든 직후 뜨는 메모 파일은 꼭 저장해 두세요(잊어버리면 되찾을 방법이 없어요)." },
-    { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 올리면(PC는 끌어다 놓기, 휴대폰은 탭해서 선택) 한 번에 등록됩니다." },
-    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다. 체육관 등에서 화면을 여러 학생이 함께 보는 상황이라면, 학년·반 선택 칸 오른쪽의 \"이름 가림\" 버튼을 눌러 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력할 수 있습니다." },
-    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별·종목별 등급을 참고용으로 확인할 수 있습니다. 학교급별 공식 기준표도 같은 탭에서 볼 수 있어요." },
-    { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 상단의 \"빔프로젝터 고정모드\"를 누르면 전광판이 잠긴 새 창으로 열려, 그 창은 빔프로젝터로 띄워두고 원래 창에서는 다른 작업을 계속할 수 있습니다. 전광판 창을 나가려면 접근 신청 비밀번호가 필요해 학생이 함부로 조작할 수 없습니다. 개인정보 보호를 위해 전광판에는 학생 이름 대신 [학년-반-번호]만 표시됩니다." },
-    { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다. 다운로드하면 삭제 안내 팝업이 함께 뜨니, 나이스 등록을 마쳤다면 컴퓨터에서 바로 지워주세요." },
-    { title: "학기 마감", body: "측정과 나이스 등록이 모두 끝나면 \"마감\" 탭(개설자만 보임)에서 백업을 받은 뒤 마감하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 마감하면 기록과 학생 명단뿐 아니라 학교 코드 자체가 삭제되므로, 다음 학기에는 새 코드를 만들어 시작합니다. JSON 백업은 필수이고, 나이스 제출양식과 비슷한 엑셀로 전체 기록을 받아둘 수도 있습니다(선택). 내려받은 파일은 프로그램이 대신 지울 수 없으니, 필요가 없어지면 컴퓨터에서 직접 삭제해 주세요." },
-  ];
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3><ClipboardList size={18} color="var(--gold)" /> 사용설명서</h3>
-          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          <div className="text-dim small-note">처음 쓰시는 분도 이 순서만 따라 하시면 됩니다.</div>
-          <div className="text-dim small-note">
-            <b>공용 PC 자동 잠금</b>: 접근 신청 비밀번호를 설정해 두면, 약 12분간 마우스·키보드·터치
-            조작이 없을 때 화면이 자동으로 잠기고 그 비밀번호를 다시 입력해야 계속 쓸 수 있습니다.
-            체육관·교무실처럼 여러 사람이 함께 쓰는 컴퓨터에서 자리를 비웠을 때 학생 정보가
-            그대로 노출되는 것을 막기 위한 기능입니다.
-          </div>
-          {steps.map((s, i) => (
-            <div className="share-step" key={i}>
-              <span className="share-step-num">{i + 1}</span>
-              <div>
-                <div className="share-step-title">{s.title}</div>
-                <div className="share-step-body">{s.body}</div>
-                {i === 0 && (
-                  <>
-                    <button type="button" className="manual-note-btn" onClick={() => setCodeNoteOpen(v => !v)}>
-                      코드 이름은 왜 학교와 무관하게? {codeNoteOpen ? "▲" : "▼"}
-                    </button>
-                    {codeNoteOpen && (
-                      <div className="manual-note-box">
-                        학생 기록에는 학년·반·번호가 들어갑니다. 여기에 학교 이름까지 코드로
-                        알려지면, 그 학교 사정을 아는 사람은 "몇 학년 몇 반 몇 번이 누구인지"를
-                        비교적 쉽게 유추할 수 있습니다. 코드를 학교 이름과 무관하게 정하면, 이
-                        코드만으로는 어느 학교인지 알 수 없어 이런 위험을 줄일 수 있습니다.
-                      </div>
-                    )}
-                  </>
-                )}
-                {i === 1 && (
-                  <>
-                    <button type="button" className="manual-note-btn" onClick={() => setNameNoteOpen(v => !v)}>
-                      학생 이름은 어디에 저장되나요? {nameNoteOpen ? "▲" : "▼"}
-                    </button>
-                    {nameNoteOpen && (
-                      <div className="manual-note-box">
-                        이 사이트는 학생 이름을 서버(Firestore)에 아예 보내지 않습니다. 서버에는
-                        학년·반·번호·성별처럼 학생을 구분하는 정보만 저장되고, 실제 이름은 지금
-                        입력하고 있는 <b>이 기기(브라우저)에만</b> 남습니다.<br /><br />
-                        그래서 같은 학교 코드로 다른 기기(동료 선생님 컴퓨터, 새로 바꾼 휴대폰 등)에
-                        처음 접속하면, 그 기기엔 아직 이름표가 없어서 이름 대신 "(이름 미확인 - 이
-                        기기)"처럼 보일 수 있어요. 그 상태에서 실명이 포함된 백업 파일을 불러오면
-                        그 기기에도 이름이 채워집니다(개설자만 가능). 학생관리에서 같은 명렬표 엑셀을
-                        다시 올려도 이름이 채워집니다.<br /><br />
-                        <b>전광판 화면</b>은 어느 기기에서 보든 이름 대신 [학년-반-번호] 형태로만
-                        표시됩니다(개인정보 보호를 위해 항상 가림).<br /><br />
-                        <b>이름이 그대로 들어가는 곳</b>: 데이터 백업(JSON) 파일, 나이스 제출용
-                        엑셀 파일 — 이 둘은 이 기기에 저장된 이름표를 이용해 실명을 채워 넣으며,
-                        실명이 필요한 목적이라 의도적으로 포함시킵니다. JSON 백업은 여러 명이
-                        각자 백업하면 혼선이 생길 수 있어 개설자만 내보내고 불러올 수 있습니다.
-                      </div>
-                    )}
-                    <button type="button" className="manual-note-btn" onClick={() => setRosterNoteOpen(v => !v)}>
-                      엑셀로 한 번에 등록하기 {rosterNoteOpen ? "▲" : "▼"}
-                    </button>
-                    {rosterNoteOpen && (
-                      <div className="manual-note-box">
-                        <b>엑셀로 한 번에 등록하기</b>: 휴대폰에 저장해 둔 명렬표 파일도 그대로 쓸 수
-                        있습니다. 끌어다 놓기 대신, "엑셀 파일을 여기로 끌어다 놓거나 눌러서
-                        선택하세요" 칸을 탭하면 휴대폰의 파일 선택 화면(파일 앱, 다운로드 폴더,
-                        클라우드 드라이브 등)이 열립니다.<br /><br />
-                        나이스 "학생명렬 내려받기"로 받은 파일을 올려야 성별이 정확히 들어갑니다.
-                        성별 열이 없거나 인식되지 않으면 학생 전원이 자동으로 "여"로 등록되니, 올린
-                        뒤에는 명단에서 성별이 맞게 들어갔는지 꼭 확인해 주세요.<br /><br />
-                        같은 파일을 실수로 다시 올려도 괜찮습니다. 학년·반·번호가 같은 학생은 새로
-                        추가되지 않고 기존 정보가 갱신될 뿐이라, 중복 학생이 생기지 않습니다.
-                      </div>
-                    )}
-                  </>
-                )}
-                {i === 2 && (
-                  <>
-                    <button type="button" className="manual-note-btn" onClick={() => setMobileNoteOpen(v => !v)}>
-                      스마트폰으로 기록하기 {mobileNoteOpen ? "▲" : "▼"}
-                    </button>
-                    {mobileNoteOpen && (
-                      <div className="manual-note-box">
-                        <b>스마트폰으로 기록하기</b>: 이 사이트를 스마트폰 브라우저(사파리·크롬 등)로 열고
-                        "코드로 로그인"에 학교 코드와 개설자 전용 비밀번호를 입력하면 노트북과 똑같이
-                        기록을 입력할 수 있습니다. 동료 선생님은 "접근 신청"으로 들어오면 됩니다.<br /><br />
-                        <b>홈 화면에 아이콘처럼 추가하기</b>: 안드로이드(크롬)는 메뉴(⋮) → "홈 화면에 추가"
-                        또는 "앱 설치", 아이폰(사파리)은 공유 버튼 → "홈 화면에 추가"를 누르면, 매번
-                        링크를 찾지 않아도 앱처럼 아이콘을 눌러 바로 열립니다.<br /><br />
-                        다만 이건 <b>바로가기 아이콘</b>이라, 잠금화면이나 홈 화면에 실시간 순위 같은
-                        정보가 그대로 표시되는 &quot;위젯&quot;까지는 만들어지지 않습니다. 열면 화면이 뜨는
-                        정도로 이해해 주세요.
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function PendingApprovalScreen({ name, type, onCancel }) {
@@ -2650,10 +2641,8 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
   );
 }
 
-function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, lastSync, activeYear, setActiveYear, workspaceCode, onChangeWorkspace, onEnterPresentation, screenMode, onChangeScreenMode }) {
+function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, lastSync, activeYear, setActiveYear, workspaceCode, onChangeWorkspace, onEnterPresentation, screenMode, onChangeScreenMode, isPractice }) {
   const isAdmin = role === "admin";
-  const [updatesOpen, setUpdatesOpen] = useState(false);
-  const [deviceGuideOpen, setDeviceGuideOpen] = useState(false);
   const allTabs = [
     { id: "board", label: "전광판", icon: Monitor },
     { id: "roster", label: "학생관리", icon: Users, adminOnly: true },
@@ -2662,6 +2651,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
     { id: "backup", label: "데이터 백업", icon: Database, adminOnly: true },
     { id: "access", label: "접근권한", icon: ShieldCheck, adminOnly: true, badge: pendingCount },
     { id: "closeout", label: "마감", icon: Trash2, founderOnly: true, danger: true },
+    { id: "guide", label: "사용 가이드", icon: BookOpen },
   ];
   const tabs = allTabs.filter(t => (!t.adminOnly || isAdmin) && (!t.founderOnly || (isAdmin && isFounder)));
   const secAgo = lastSync ? Math.max(0, Math.round((Date.now() - lastSync) / 1000)) : null;
@@ -2683,13 +2673,9 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
         </span>
         <Trophy size={20} color="var(--gold)" />
         <span className="brand-text">{schoolName ? schoolName + " " : ""}SMART PAPS</span>
-        <button className="feature-updates-btn" onClick={() => setUpdatesOpen(true)} title="이 프로그램이 할 수 있는 일 모아보기">
-          <Award size={12} /> 기능설명
-        </button>
-        <button className="feature-updates-btn" onClick={() => setDeviceGuideOpen(true)} title="휴대폰·노트북 함께 쓰는 법 자세히 보기">
-          <Info size={12} /> 상세설명
-        </button>
-        {isAdmin ? (
+        {isPractice ? (
+          <span className="workspace-badge practice-badge" title="가짜 학생으로 체험 중">연습모드</span>
+        ) : isAdmin ? (
           <button className="workspace-badge" onClick={onChangeWorkspace} title="워크스페이스 코드 변경">
             코드: {workspaceCode}
           </button>
@@ -2732,169 +2718,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           <Maximize2 size={14} /> 빔프로젝터 고정모드
         </button>
       </div>
-      {updatesOpen && <FeatureUpdatesModal isAdmin={isAdmin} onClose={() => setUpdatesOpen(false)} />}
-      {deviceGuideOpen && <DeviceSyncGuideModal onClose={() => setDeviceGuideOpen(false)} />}
     </div>
-  );
-}
-
-// "개설자 전용 비밀번호로 다른 기기에서 즉시 재접속"(접근 권한 확인 로직)과 "같은 이름 +
-// 같은 권한 종류로 재신청하면 기존 승인을 이어받기"(requestAccess)는 실제로 구현되어 있으므로,
-// 두 기능의 설명을 여기서 함께 안내한다. 동작을 바꾸면 이 안내문도 같이 고쳐야 한다.
-function DeviceSyncGuideModal({ onClose }) {
-  const sections = [
-    {
-      title: "기본 원리",
-      body: "휴대폰·노트북 어디서 접속하든 같은 \"학교 코드\"로 들어오면 같은 데이터를 봅니다. 다만 코드만으로는 들어올 수 없고, 개설자는 개설자 전용 비밀번호로, 동료 교사는 접근 신청으로 들어옵니다. 한 기기에서 기록을 입력하면 몇 초 안에 다른 기기 화면에도 자동으로 반영돼요(따로 저장·새로고침 누를 필요 없음).",
-    },
-    {
-      title: "여러 기기를 어떻게 나눠 쓰면 좋은가",
-      body: "예: 노트북은 교무실 책상에 두고 등급표·백업 등 정리 작업을, 휴대폰은 운동장에 들고 나가 실측 기록 입력을 담당하는 식으로 나눠 쓰면 편합니다. 두 기기 모두 \"코드로 로그인\"에 같은 코드와 개설자 전용 비밀번호를 입력하면 됩니다.",
-    },
-    {
-      title: "개설자 권한을 여러 기기에서 쓰려면",
-      body: "코드를 처음 만들 때 정한 \"개설자 전용 비밀번호\"를 기억해두세요. 다른 기기의 \"코드로 로그인\" 화면에 코드와 이 비밀번호를 입력하면, 별도 승인 없이 바로 개설자 권한으로 들어갈 수 있습니다.",
-    },
-    {
-      title: "동료 교사가 다른 기기에서 다시 들어와야 할 때",
-      body: "이미 승인받은 것과 똑같은 이름 + 똑같은 권한 종류(수정 권한/조회)로 접근 신청을 다시 하면, 처음부터 다시 승인을 기다리지 않고 기존 승인을 그대로 이어받습니다. 이름을 정확히 똑같이 입력하는 게 중요해요.",
-    },
-    {
-      title: "1년 지난 코드는 자동으로 마감됩니다",
-      body: "마감(전체 데이터 삭제)을 깜빡 잊고 넘어가는 경우를 대비해, 코드를 개설한 지 1년이 지난 뒤 처음 접속할 때 자동으로 마감 처리되어 기록·명단·설정이 모두 삭제되고 첫 화면으로 돌아갑니다. 만료 30일 전부터 개설자에게 경고 배너가 뜨고, 계속 쓰실 거라면 \"계속 사용(1년 연장)\" 버튼으로 기한을 늘릴 수 있습니다.",
-    },
-  ];
-  const cautions = [
-    "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보와 이 기기에만 저장된 학생 이름표가 사라집니다. 다시 접근 절차를 밟아야 하고, 이름은 \"(이름 미확인 - 이 기기)\"로 보일 수 있습니다.",
-    "같은 이름을 쓰는 동료 교사가 두 명 이상이면, 위 \"기존 승인 이어받기\" 기능 때문에 서로 같은 자리를 나눠 쓰게 될 수 있어요. 이름에 학년·반처럼 구분되는 정보를 꼭 포함해 주세요.",
-    "개설자 전용 비밀번호는 동료 교사에게 알려주지 마세요 — 이걸 아는 사람은 승인 절차 없이 곧바로 전체 권한을 갖게 됩니다.",
-    "JSON 백업(내보내기·불러오기)은 개설자 기기에서만 할 수 있습니다. 여러 기기에서 각자 백업·복원하면 서로 다른 시점의 기록이 뒤섞일 수 있어, 백업은 개설자 한 명이 맡는 것을 권장합니다.",
-    "인터넷 연결이 끊긴 상태에서 입력한 기록은 연결이 복구되어야 다른 기기에 반영됩니다.",
-    "1년 자동 마감은 되돌릴 수 없습니다. 계속 쓰실 코드라면 경고 배너가 뜰 때 꼭 \"계속 사용(1년 연장)\"을 눌러주세요.",
-  ];
-  // 포털로 document.body에 직접 렌더링한다. 이 모달은 상단바(.topnav, backdrop-filter 적용)
-  // 안에서 호출되는데, backdrop-filter가 있는 조상은 position:fixed 자손의 기준(containing
-  // block)을 자기 자신으로 바꿔버려서, 포털 없이는 모달이 화면 전체가 아니라 상단바 영역
-  // 안에서만 보여 화면 중앙이 아닌 위쪽에 치우쳐 보이는 문제가 있었다.
-  return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3><Info size={18} color="var(--gold)" /> 상세설명 — 여러 기기 함께 쓰기</h3>
-          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          {sections.map((s, i) => (
-            <div className="feature-update-group" key={i}>
-              <h4>{s.title}</h4>
-              <div className="text-dim small-note">{s.body}</div>
-            </div>
-          ))}
-          <div className="feature-update-group">
-            <h4>주의·유의사항</h4>
-            <ul className="device-guide-caution-list">
-              {cautions.map((c, i) => <li key={i} className="text-dim small-note">{c}</li>)}
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-function FeatureUpdatesModal({ isAdmin, onClose }) {
-  const groups = [
-    {
-      title: "측정 도구",
-      items: [
-        "종목별 실시간 지수·합계 자동계산 — 심박수·부위 점수 등을 입력하면 지수·합계가 즉시 계산됨",
-        "종목별 측정 편의성 향상 — 반 전체 동시 측정 타이머, 운동장 코스 계산기 등 현장에서 바로 쓸 수 있는 세팅 제공",
-        "종목별 음원 재생 — 윗몸말아올리기·스텝검사는 교육부 공식 음원, 왕복오래달리기는 자체 신호음 또는 유튜브 영상을 화면에서 바로 재생",
-      ],
-    },
-    {
-      title: "함께 쓰기",
-      items: [
-        "조회는 즉시, 수정은 개설자 승인 후 — 권한별 안전한 분리",
-        "승인·비밀번호·마감은 개설자만 — 오조작 위험 최소화",
-        "변경 이력·되돌리기로 잘못된 입력도 바로 복구",
-      ],
-    },
-    {
-      title: "데이터 보안",
-      items: [
-        "학교 코드와 비밀번호를 모두 알아야 접근 가능 — 코드만으로는 들어올 수 없음",
-        "접근 신청 비밀번호 5회 오답 시 10분간 신청 제한 — 무작위 대입 시도 차단",
-        "누가 언제 무엇을 바꿨는지 전부 기록 — 문제 발생 시 추적 가능",
-        "승인·비밀번호 변경·마감 같은 민감한 조작은 개설자 1인만 — 통제된 접근 구조",
-        "빔프로젝터 고정모드는 잠긴 전광판 새 창으로 열림 — 교사가 자리를 비운 사이 학생의 임의 조작·확인 방지(원래 창에서는 작업 계속 가능)",
-        "공용 PC 자동 잠금(세션 타임아웃) — 약 12분간 조작이 없으면 화면이 자동으로 잠기고, 계속 쓰려면 접근 신청 비밀번호를 다시 입력해야 함",
-        "실시간 측정 중 이름 가림 모드 — 기록관리 화면에서 버튼 하나로 학생 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력 가능",
-        "다운로드한 파일 삭제 안내 — 나이스 반영·백업(엑셀/JSON) 파일을 내려받을 때마다, 등록을 마쳤다면 컴퓨터에서 삭제해 달라는 안내가 뜸",
-      ],
-    },
-    {
-      title: "데이터 보관 기간",
-      items: [
-        "측정 기록은 \"마감\"을 누르기 전까지 계속 보관됨 — 학기 중에는 자동으로 사라지지 않음",
-        "마감 시 기록·학생 명단·학교 코드가 모두 즉시 삭제됨 — 다음 학기에는 새 코드를 만들어 시작",
-        "변경 이력은 최근 300건까지만 보관 — 그 이상은 오래된 순으로 자동 정리",
-        "백업 파일은 내려받는 선생님의 개인 컴퓨터에만 저장 — 프로그램이 별도로 영구 보관하지 않음",
-      ],
-    },
-    {
-      title: "데이터 관리",
-      items: [
-        "백업 파일로 데이터 손실 위험 최소화 — 여러 명이 각자 백업·복원하면 최신 기록이 뒤섞일 수 있어 개설자만 가능",
-        "나이스 학생명렬 엑셀로 명단 한 번에 등록 — 학생관리에서 파일만 올리면(휴대폰은 탭해서 선택) 학년·반·번호·이름·성별을 자동으로 채워줌",
-        "나이스 '자료올리기'용 엑셀 형식 지원 — 프로그램 내 기록을 토대로 나이스 업로드 양식에 맞춰 채워줌",
-        "마감 전 백업 필수 — 실수로 지워도 되살릴 수 있는 최소한의 안전장치",
-        "1년 지난 코드는 자동 마감 — 마감을 깜빡 잊어도 개설 1년 후 다음 접속 때 자동으로 전체 삭제되어 기록이 쌓이지 않음(만료 30일 전부터 경고, 연장 가능)",
-      ],
-    },
-    {
-      title: "학교 상황에 맞추기",
-      items: [
-        "학교급 선택만으로 학년·등급 기준 자동 적용",
-        "모바일 지원 — 현장 어디서든 입력 가능",
-        "홈 화면에 앱처럼 설치 — 접근권한 탭의 모바일 공유 안내에서 설치(아이폰은 공유 → 홈 화면에 추가)",
-      ],
-    },
-  ];
-  // DeviceSyncGuideModal과 같은 이유로 포털을 사용한다(상단바의 backdrop-filter가 만드는
-  // containing block 문제로, 포털 없이는 화면 중앙이 아니라 상단바 영역에 치우쳐 보인다).
-  return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3><Award size={18} color="var(--gold)" /> 기능설명</h3>
-          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          {groups.map(g => (
-            <div className="feature-update-group" key={g.title}>
-              <h4>{g.title}</h4>
-              <ul>
-                {g.items.map((it, i) => {
-                  const parts = it.split(" — ");
-                  return (
-                    <li key={i}>
-                      <span className="feature-update-headline">{parts[0]}</span>
-                      {parts[1] && <span className="feature-update-desc">{parts[1]}</span>}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-          {!isAdmin && (
-            <div className="text-dim small-note">조회 전용 계정에서는 이 중 일부(기록 입력, 학생 관리 등)는 사용할 수 없습니다.</div>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body
   );
 }
 
@@ -6968,6 +6792,12 @@ function PapsStyles({ children }) {
         .gate-name-hint { text-align: left; margin: -6px 0 12px; }
         .gate-back-toggle { width: 100%; justify-content: center; margin-top: 10px; font-size: 12px; }
         .gate-divider { width: 48px; height: 2px; background: var(--line); border-radius: 999px; margin: 6px 0 16px; }
+        .gate-help-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+        .practice-btn { border-color: var(--accent); color: var(--accent); }
+        .practice-badge { border-color: var(--accent); color: var(--accent); }
+        .practice-banner { flex-wrap: wrap; border-color: var(--accent); }
+        .practice-banner > span:first-of-type { flex: 1 1 260px; min-width: 0; }
+        .practice-banner-actions { display: flex; gap: 6px; flex-wrap: wrap; }
         .manual-btn {
           display: inline-flex; align-items: center; gap: 5px; background: rgba(255,201,60,0.12);
           border: 1px solid rgba(255,201,60,0.4); color: var(--gold); border-radius: 999px;
