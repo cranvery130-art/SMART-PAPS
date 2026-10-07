@@ -1732,7 +1732,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             <span>
               {role === "viewer"
                 ? "지도 목적 확인을 위한 조회 전용 화면입니다. 학생 개인정보인 체력 기록은 지도 목적 외로 저장·공유하지 마세요."
-                : "이 기록판의 데이터는 이 화면 링크를 여는 모든 기기에서 함께 보이고 수정됩니다."}
+                : "같은 학교 코드로 접속한 선생님들과 기록이 실시간으로 공유됩니다. 수정 권한이 있는 선생님은 함께 입력·수정할 수 있어요."}
             </span>
             <button className="icon-btn" onClick={() => setBannerDismissed(true)}><X size={14} /></button>
           </div>
@@ -1957,9 +1957,9 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
     const result = await onRequestAccess({ name, code: reqCode, password: reqPassword, wantsEdit });
     setSubmitting(false);
     if (!result.ok) {
-      if (result.reason === "bad-code") setFormError("존재하지 않는 학교 코드입니다. 관리자에게 다시 확인해 주세요.");
-      else if (result.reason === "no-password-set") setFormError("이 학교는 아직 열람 비밀번호가 설정되어 있지 않습니다. 관리자에게 문의해 주세요.");
-      else if (result.reason === "bad-password") setFormError("열람 비밀번호가 올바르지 않습니다.");
+      if (result.reason === "bad-code") setFormError("존재하지 않는 학교 코드입니다. 개설자 선생님께 다시 확인해 주세요.");
+      else if (result.reason === "no-password-set") setFormError("이 학교는 아직 접근 신청 비밀번호가 설정되어 있지 않습니다. 개설자 선생님께 문의해 주세요.");
+      else if (result.reason === "bad-password") setFormError("접근 신청 비밀번호가 올바르지 않습니다.");
       else if (result.reason === "too-many-attempts") setFormError("비밀번호를 너무 여러 번 틀렸습니다. 10분 뒤 다시 시도해 주세요.");
       else setFormError("신청을 처리하지 못했습니다. 다시 시도해 주세요.");
     }
@@ -2027,7 +2027,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
                 </div>
               </div>
               <div className="gate-pw-row">
-                <label>안내용 비밀번호</label>
+                <label>접근 신청 비밀번호 (동료 교사용)</label>
                 <div className="pw-row">
                   <input
                     className="input"
@@ -2074,18 +2074,20 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
                   <div className="text-dim small-note gate-pw-hint">
                     <b>개설자 전용 비밀번호:</b> 선생님(개설자) 본인만 알아야 하는 비밀번호입니다.
                     나중에 다른 기기(휴대폰↔컴퓨터 등)에서 같은 코드와 이 비밀번호를 "코드로 로그인"
-                    화면에 입력하면, 승인 절차 없이 곧바로 개설자로 다시 들어올 수 있어요. 아래
-                    "안내용 비밀번호"와는 다른 값으로 정해주세요(동료 교사에게는 절대 알려주지 마세요).
+                    화면에 입력하면, 승인 절차 없이 곧바로 개설자로 다시 들어올 수 있어요. 비워두면
+                    다른 기기에서 개설자로 로그인할 수 없으니 꼭 정해주세요. 아래 "접근 신청
+                    비밀번호"와는 다른 값으로 정하고, 동료 교사에게는 절대 알려주지 마세요.
                   </div>
                   <div className="text-dim small-note gate-pw-hint">
-                    <b>안내용 비밀번호:</b> 동료 교사에게 안내해 접근 신청 시 입력하게 할
-                    비밀번호입니다. 비워두면, 다른 선생님이 신청해도 아무도 들어올 수 없어요.
-                    연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로
-                    정해주세요.
+                    <b>접근 신청 비밀번호:</b> 동료 교사가 "접근 신청"을 할 때 입력하는
+                    비밀번호입니다. 공용 PC 자동 잠금과 빔프로젝터 화면 잠금을 풀 때도 쓰입니다.
+                    비워두면 접근 신청과 화면 잠금이 모두 꺼집니다. 연도나 "1111" 같은 숫자만으로는
+                    짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
                   </div>
                   <div className="text-dim small-note">
-                    <Info size={13} /> 이미 등록되어 있는 학교코드라면, 개설자 전용 비밀번호가
-                    맞을 때만 개설자로 들어가지고, 그 외에는 반영되지 않습니다.
+                    <Info size={13} /> 이미 있는 학교 코드를 입력하면 새로 만들어지지 않습니다.
+                    이때는 개설자 전용 비밀번호가 맞을 때만 개설자로 들어가고, 입력한 다른 설정은
+                    반영되지 않습니다.
                   </div>
                 </div>
               )}
@@ -2101,8 +2103,8 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
             <>
               <h2>코드로 로그인</h2>
               <p className="gate-desc">
-                이미 만들어 둔 학교 코드가 있으신가요? 코드와 개설자 전용 비밀번호를 입력하면
-                바로 들어갈 수 있습니다.
+                학교 코드를 만든 개설자 선생님은 코드와 개설자 전용 비밀번호를 입력하면 어느
+                기기에서든 바로 들어갈 수 있습니다.
               </p>
               <input
                 className="input big-input gate-input"
@@ -2132,7 +2134,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
               <div className="gate-divider" />
 
               <button className="gate-link-btn" onClick={() => setMode("notice")}>
-                이미 학교 코드가 있으신가요? <span className="gate-link-cta">접근 신청 →</span>
+                동료 선생님이 만든 코드로 들어가시나요? <span className="gate-link-cta">접근 신청 →</span>
               </button>
               <div className="gate-input-hint">
                 동료 교사가 신청하면, 조회는 바로 이용할 수 있고 수정 권한은 개설자가 승인해야 사용할 수 있어요.
@@ -2154,11 +2156,11 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           <h2>접근 신청 안내</h2>
           <ul className="gate-notice-list">
             <li><b>해당 학교 소속 선생님만</b> 그 학교의 학생 기록에 접근할 수 있습니다. 다른 학교 기록은 볼 수 없습니다.</li>
-            <li>신청하려면 관리자(체육교사)에게 <b>학교 코드</b>와 <b>열람 비밀번호</b>를 미리 안내받아야 합니다. 둘 다 정확히 입력해야 합니다.</li>
+            <li>신청하려면 개설자(학교 코드를 만든 선생님)에게 <b>학교 코드</b>와 <b>접근 신청 비밀번호</b>를 미리 안내받아야 합니다. 둘 다 정확히 입력해야 합니다.</li>
             <li>이 신청은 <b>학생은 이용할 수 없습니다.</b> 학생 체력 기록 확인·입력이 필요한 교사만 신청해 주세요.</li>
             <li>학생의 체력 측정 기록은 민감한 개인정보입니다. 확인한 뒤에도 지도 목적 외 용도로 저장·촬영·공유하지 않아야 합니다.</li>
-            <li>신청 시 입력한 이름은 관리자가 접속자를 파악하는 용도로만 쓰이며, 관리자는 언제든 개별적으로 접근을 취소할 수 있습니다.</li>
-            <li>기본으로 부여되는 권한은 <b>조회(확인) 전용</b>입니다. 학생 기록을 입력·수정해야 한다면 다음 화면에서 <b>수정 권한도 함께 신청</b>할 수 있으며, 이 경우 관리자의 별도 승인이 필요합니다.</li>
+            <li>신청 시 입력한 이름은 개설자가 접속자를 파악하는 용도로만 쓰이며, 개설자는 언제든 개별적으로 접근을 취소할 수 있습니다.</li>
+            <li>기본으로 부여되는 권한은 <b>조회(확인) 전용</b>이며, 비밀번호가 맞으면 바로 들어갈 수 있습니다. 학생 기록을 입력·수정해야 한다면 다음 화면에서 <b>수정 권한도 함께 신청</b>할 수 있으며, 이 경우 개설자의 승인이 필요합니다.</li>
           </ul>
           <label className="gate-agree">
             <input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} />
@@ -2179,7 +2181,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
         <div className="gate-card">
           <Users size={32} color="var(--gold)" />
           <h2>접근 신청</h2>
-          <p className="gate-desc">관리자에게 안내받은 학교 코드와 열람 비밀번호를 입력해 주세요.</p>
+          <p className="gate-desc">개설자 선생님께 안내받은 학교 코드와 접근 신청 비밀번호를 입력해 주세요.</p>
           <input
             className="input big-input gate-input"
             placeholder="이름 (예: 2학년 3반 담임 김민준)"
@@ -2199,14 +2201,14 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode }) {
           <input
             className="input big-input gate-input"
             type="password"
-            placeholder="열람 비밀번호"
+            placeholder="접근 신청 비밀번호"
             value={reqPassword}
             onChange={e => setReqPassword(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && name.trim() && reqCode.trim() && reqPassword.trim()) handleRequestSubmit(); }}
           />
           <label className="gate-agree">
             <input type="checkbox" checked={wantsEdit} onChange={e => setWantsEdit(e.target.checked)} />
-            학생 기록을 입력·수정할 권한도 필요합니다 (같은 학교 동료 체육교사만 해당 · 관리자 승인 필요)
+            학생 기록을 입력·수정할 권한도 필요합니다 (같은 학교 동료 체육교사만 해당 · 개설자 승인 필요)
           </label>
           {formError && <div className="gate-error">{formError}</div>}
           <div className="gate-btn-row">
@@ -2233,13 +2235,13 @@ function UserManualModal({ onClose }) {
   const [nameNoteOpen, setNameNoteOpen] = useState(false);
   const [rosterNoteOpen, setRosterNoteOpen] = useState(false);
   const steps = [
-    { title: "시작하기", body: "학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호도 함께 정해두면, 나중에 따로 설정할 필요가 없어요." },
+    { title: "시작하기", body: "첫 화면의 \"새 코드 만들기\"에서 학교급(초/중/고)을 고르고 우리 학교만의 코드를 만드세요. 학교 이름이 들어가지 않은 코드를 추천해요(예: 낭만체육123). 이때 비밀번호 두 개도 함께 정해주세요. \"개설자 전용 비밀번호\"는 다른 기기에서 개설자로 로그인할 때, \"접근 신청 비밀번호\"는 동료 교사가 접근 신청할 때 씁니다. 만든 직후 뜨는 메모 파일은 꼭 저장해 두세요(잊어버리면 되찾을 방법이 없어요)." },
     { title: "학생 등록", body: "\"학생관리\" 탭에서 명단을 등록하세요. 한 명씩 직접 입력하거나, 엑셀 파일을 올리면(PC는 끌어다 놓기, 휴대폰은 탭해서 선택) 한 번에 등록됩니다." },
-    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다. 체육관 등에서 화면을 여러 학생이 함께 보는 상황이라면, 화면 위쪽의 \"이름 가림\" 버튼을 눌러 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력할 수 있습니다." },
-    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별 종목별 등급을 참고용으로 확인할 수 있습니다." },
-    { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 빔프로젝터 고정모드를 누르면 화면이 자동으로 잠겨, 학생이 함부로 조작할 수 없습니다. 개인정보보호법에 따라 전광판에는 학생 이름이 표시되지 않습니다." },
+    { title: "기록 측정·입력", body: "\"기록관리\" 탭에서 종목을 고르고, 학년·반을 선택해 기록을 입력하세요. 종목별로 음원 재생·타이머·자동 계산 같은 도구가 함께 제공됩니다. 체육관 등에서 화면을 여러 학생이 함께 보는 상황이라면, 학년·반 선택 칸 오른쪽의 \"이름 가림\" 버튼을 눌러 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력할 수 있습니다." },
+    { title: "등급 확인", body: "\"등급표\" 탭에서 학생별·종목별 등급을 참고용으로 확인할 수 있습니다. 학교급별 공식 기준표도 같은 탭에서 볼 수 있어요." },
+    { title: "전광판으로 공유 가능(선택)", body: "\"전광판\" 탭에서 실시간 순위를 보여주세요. 상단의 \"빔프로젝터 고정모드\"를 누르면 전광판이 잠긴 새 창으로 열려, 그 창은 빔프로젝터로 띄워두고 원래 창에서는 다른 작업을 계속할 수 있습니다. 전광판 창을 나가려면 접근 신청 비밀번호가 필요해 학생이 함부로 조작할 수 없습니다. 개인정보 보호를 위해 전광판에는 학생 이름 대신 [학년-반-번호]만 표시됩니다." },
     { title: "나이스 제출", body: "\"데이터 백업\" 탭에서 나이스 엑셀양식 파일을 올리면, 우리 기록을 자동으로 채워줍니다. 학교 시스템 제출용 양식이므로 이 파일에는 학생 이름이 포함되어 만들어집니다. 다운로드하면 삭제 안내 팝업이 함께 뜨니, 나이스 등록을 마쳤다면 컴퓨터에서 바로 지워주세요." },
-    { title: "학기 마감", body: "측정이 모두 끝나면 \"마감\" 탭에서 백업을 받은 뒤 기록을 정리하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 필수인 JSON 백업 외에, 나중에 참고가 필요할 수도 있는 경우를 대비해 나이스 제출양식과 비슷한 형태의 엑셀로 전체 기록을 받아둘 수도 있습니다(선택). 이때 받는 백업 파일들은 나이스 등록이 끝난 뒤에는 컴퓨터에서 삭제해 주세요 — 앱 안의 기록은 마감으로 지워져도, 한 번 내려받아 다운로드 폴더에 남은 파일은 이 프로그램이 대신 지울 수 없습니다." },
+    { title: "학기 마감", body: "측정과 나이스 등록이 모두 끝나면 \"마감\" 탭(개설자만 보임)에서 백업을 받은 뒤 마감하세요. 학생 개인정보를 필요 이상 보관하지 않기 위한 절차입니다. 마감하면 기록과 학생 명단뿐 아니라 학교 코드 자체가 삭제되므로, 다음 학기에는 새 코드를 만들어 시작합니다. JSON 백업은 필수이고, 나이스 제출양식과 비슷한 엑셀로 전체 기록을 받아둘 수도 있습니다(선택). 내려받은 파일은 프로그램이 대신 지울 수 없으니, 필요가 없어지면 컴퓨터에서 직접 삭제해 주세요." },
   ];
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2251,10 +2253,10 @@ function UserManualModal({ onClose }) {
         <div className="modal-body">
           <div className="text-dim small-note">처음 쓰시는 분도 이 순서만 따라 하시면 됩니다.</div>
           <div className="text-dim small-note">
-            <b>공용 PC 자동 잠금</b>: 접근 신청 비밀번호를 설정해 두면, 로그인 후 약 12분간
-            마우스·키보드 조작이 없을 때 화면이 자동으로 잠기고 비밀번호를 다시 입력해야
-            계속 쓸 수 있습니다. 체육관·교무실처럼 여러 사람이 함께 쓰는 컴퓨터에서 자리를
-            비웠을 때 학생 정보가 그대로 노출되는 것을 막기 위한 기능입니다.
+            <b>공용 PC 자동 잠금</b>: 접근 신청 비밀번호를 설정해 두면, 약 12분간 마우스·키보드·터치
+            조작이 없을 때 화면이 자동으로 잠기고 그 비밀번호를 다시 입력해야 계속 쓸 수 있습니다.
+            체육관·교무실처럼 여러 사람이 함께 쓰는 컴퓨터에서 자리를 비웠을 때 학생 정보가
+            그대로 노출되는 것을 막기 위한 기능입니다.
           </div>
           {steps.map((s, i) => (
             <div className="share-step" key={i}>
@@ -2265,7 +2267,7 @@ function UserManualModal({ onClose }) {
                 {i === 0 && (
                   <>
                     <button type="button" className="manual-note-btn" onClick={() => setCodeNoteOpen(v => !v)}>
-                      참고사항 {codeNoteOpen ? "▲" : "▼"}
+                      코드 이름은 왜 학교와 무관하게? {codeNoteOpen ? "▲" : "▼"}
                     </button>
                     {codeNoteOpen && (
                       <div className="manual-note-box">
@@ -2280,18 +2282,18 @@ function UserManualModal({ onClose }) {
                 {i === 1 && (
                   <>
                     <button type="button" className="manual-note-btn" onClick={() => setNameNoteOpen(v => !v)}>
-                      참고사항 {nameNoteOpen ? "▲" : "▼"}
+                      학생 이름은 어디에 저장되나요? {nameNoteOpen ? "▲" : "▼"}
                     </button>
                     {nameNoteOpen && (
                       <div className="manual-note-box">
-                        <b>지금 이 이름은 어디에 저장되나요?</b><br />
                         이 사이트는 학생 이름을 서버(Firestore)에 아예 보내지 않습니다. 서버에는
                         학년·반·번호·성별처럼 학생을 구분하는 정보만 저장되고, 실제 이름은 지금
                         입력하고 있는 <b>이 기기(브라우저)에만</b> 남습니다.<br /><br />
                         그래서 같은 학교 코드로 다른 기기(동료 선생님 컴퓨터, 새로 바꾼 휴대폰 등)에
                         처음 접속하면, 그 기기엔 아직 이름표가 없어서 이름 대신 "(이름 미확인 - 이
                         기기)"처럼 보일 수 있어요. 그 상태에서 실명이 포함된 백업 파일을 불러오면
-                        그 기기에도 이름이 채워집니다.<br /><br />
+                        그 기기에도 이름이 채워집니다(개설자만 가능). 학생관리에서 같은 명렬표 엑셀을
+                        다시 올려도 이름이 채워집니다.<br /><br />
                         <b>전광판 화면</b>은 어느 기기에서 보든 이름 대신 [학년-반-번호] 형태로만
                         표시됩니다(개인정보 보호를 위해 항상 가림).<br /><br />
                         <b>이름이 그대로 들어가는 곳</b>: 데이터 백업(JSON) 파일, 나이스 제출용
@@ -2301,7 +2303,7 @@ function UserManualModal({ onClose }) {
                       </div>
                     )}
                     <button type="button" className="manual-note-btn" onClick={() => setRosterNoteOpen(v => !v)}>
-                      참고사항 {rosterNoteOpen ? "▲" : "▼"}
+                      엑셀로 한 번에 등록하기 {rosterNoteOpen ? "▲" : "▼"}
                     </button>
                     {rosterNoteOpen && (
                       <div className="manual-note-box">
@@ -2321,14 +2323,16 @@ function UserManualModal({ onClose }) {
                 {i === 2 && (
                   <>
                     <button type="button" className="manual-note-btn" onClick={() => setMobileNoteOpen(v => !v)}>
-                      참고사항 {mobileNoteOpen ? "▲" : "▼"}
+                      스마트폰으로 기록하기 {mobileNoteOpen ? "▲" : "▼"}
                     </button>
                     {mobileNoteOpen && (
                       <div className="manual-note-box">
-                        <b>스마트폰으로 기록하기</b>: 이 화면의 링크를 스마트폰 브라우저(사파리·크롬 등)로
-                        열고 학교 코드를 입력하면 노트북과 똑같이 기록을 입력할 수 있습니다.<br /><br />
-                        <b>홈 화면에 아이콘처럼 추가하기</b>: 브라우저의 공유 버튼 → "홈 화면에 추가"를
-                        누르면, 매번 링크를 찾지 않아도 앱처럼 아이콘을 눌러 바로 열립니다.<br /><br />
+                        <b>스마트폰으로 기록하기</b>: 이 사이트를 스마트폰 브라우저(사파리·크롬 등)로 열고
+                        "코드로 로그인"에 학교 코드와 개설자 전용 비밀번호를 입력하면 노트북과 똑같이
+                        기록을 입력할 수 있습니다. 동료 선생님은 "접근 신청"으로 들어오면 됩니다.<br /><br />
+                        <b>홈 화면에 아이콘처럼 추가하기</b>: 안드로이드(크롬)는 메뉴(⋮) → "홈 화면에 추가"
+                        또는 "앱 설치", 아이폰(사파리)은 공유 버튼 → "홈 화면에 추가"를 누르면, 매번
+                        링크를 찾지 않아도 앱처럼 아이콘을 눌러 바로 열립니다.<br /><br />
                         다만 이건 <b>바로가기 아이콘</b>이라, 잠금화면이나 홈 화면에 실시간 순위 같은
                         정보가 그대로 표시되는 &quot;위젯&quot;까지는 만들어지지 않습니다. 열면 화면이 뜨는
                         정도로 이해해 주세요.
@@ -2351,9 +2355,9 @@ function PendingApprovalScreen({ name, type, onCancel }) {
     <div className="paps-app gate-screen">
       <div className="gate-card">
         <RefreshCw className="spin" size={28} color="var(--gold)" />
-        <h2>관리자 승인 대기 중</h2>
+        <h2>개설자 승인 대기 중</h2>
         <p className="gate-desc">
-          <b>{name}</b>님의 {isEditor ? "수정 권한 요청" : "열람 신청"}이 접수되었습니다. 최초 개설자(관리자)가
+          <b>{name}</b>님의 {isEditor ? "수정 권한 요청" : "조회 신청"}이 접수되었습니다. 개설자 선생님이
           승인하면 자동으로 화면이 전환됩니다.
           {isEditor && " 승인 전까지는 기록을 입력·수정할 수 없습니다."}
         </p>
@@ -2386,8 +2390,9 @@ function BlockedScreen({ reason, onRetry }) {
           <Info size={32} color="var(--gold)" />
           <h2>접근 신청이 필요합니다</h2>
           <p className="gate-desc">
-            이미 다른 선생님이 만들어 둔 코드입니다. 코드를 입력하는 것만으로는 더 이상 권한이
-            주어지지 않아요. 다음 화면에서 "접근 신청"으로 조회 권한 또는 수정 권한을 신청해 주세요.
+            이미 만들어져 있는 코드입니다. 코드만으로는 들어갈 수 없어요. 이 코드를 만든 개설자
+            본인이라면 처음 화면에서 코드와 함께 개설자 전용 비밀번호를 입력해 주세요. 동료
+            선생님이라면 다음 화면의 "접근 신청"으로 조회 권한 또는 수정 권한을 신청해 주세요.
           </p>
           <button className="btn btn-primary" onClick={() => onRetry("form")}>접근 신청 하러 가기</button>
         </div>
@@ -2395,8 +2400,8 @@ function BlockedScreen({ reason, onRetry }) {
     );
   }
   const message = reason === "denied"
-    ? "관리자가 이 신청을 승인하지 않았습니다."
-    : "이 권한이 취소되었습니다. 필요하다면 관리자에게 다시 문의해 주세요.";
+    ? "개설자가 이 신청을 승인하지 않았습니다."
+    : "이 권한이 취소되었습니다. 필요하다면 개설자 선생님께 다시 문의해 주세요.";
   return (
     <div className="paps-app gate-screen">
       <div className="gate-card">
@@ -2477,7 +2482,8 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
         </div>
         <div className="text-dim small-note">
           비밀번호를 바꾸면 예전 비밀번호로는 신청할 수 없습니다. 이미 승인된 선생님을 막으려면
-          아래 목록에서 따로 취소해야 해요. 이 비밀번호는 아래 "빔프로젝터 화면 잠금"에도 쓰입니다.
+          아래 목록에서 따로 취소해야 해요. 이 비밀번호는 아래 "빔프로젝터 화면 잠금"과 공용 PC
+          자동 잠금을 풀 때도 쓰입니다.
           연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상을 권장합니다.
         </div>
 
@@ -2510,22 +2516,23 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
 
         <h3>빔프로젝터 화면 잠금</h3>
         <div className="text-dim small-note">
-          "빔프로젝터 고정모드"로 전광판을 띄우는 순간부터 자동으로 잠깁니다. 나가려면 위
-          비밀번호를 입력해야 해서, 자리를 비운 사이 학생 등이 함부로 다른 화면을 열 수 없습니다.
-          <b> 이 잠금은 지금 이 화면(계정)에만 적용되고, 동료 선생님 화면에는 영향을 주지 않습니다.</b>
+          "빔프로젝터 고정모드"를 누르면 전광판이 새 창으로 열리고, 그 창은 처음부터 잠겨
+          있습니다. 전광판 창을 나가려면 위 비밀번호를 입력해야 해서, 자리를 비운 사이 학생 등이
+          함부로 다른 화면을 열 수 없습니다.
+          <b> 원래 창은 잠기지 않아 계속 작업할 수 있고, 동료 선생님 화면에도 영향을 주지 않습니다.</b>
           {!settings.viewerPassword && " 비밀번호를 설정하지 않으면 잠기지 않고 바로 나가집니다."}
         </div>
       </div>
 
       <div className="panel">
         <h3>승인 대기 ({pending.length}명)</h3>
-        <div className="text-dim small-note">"수정 권한"은 접근 신청 시 "수정 권한도 필요"를 체크한 경우이고, "열람 전용"은 체크하지 않은 경우입니다.</div>
+        <div className="text-dim small-note">수정 권한을 함께 신청한 선생님만 여기에 표시됩니다. 조회 전용 신청은 비밀번호가 맞으면 바로 승인되어 아래 "승인된 계정"에 나타납니다.</div>
         {pending.length === 0 && <div className="text-dim">대기 중인 신청이 없습니다.</div>}
         <div className="access-list">
           {pending.map(r => (
             <div className="access-row" key={r.id}>
               <div>
-                <div className="access-name">{r.name} <span className={"access-type-badge" + (r.type === "editor" ? " editor" : "")}>{r.type === "editor" ? "수정 권한" : "열람 전용"}</span></div>
+                <div className="access-name">{r.name} <span className={"access-type-badge" + (r.type === "editor" ? " editor" : "")}>{r.type === "editor" ? "수정 권한" : "조회 전용"}</span></div>
                 <div className="access-time text-dim">{new Date(r.submittedAt).toLocaleString("ko-KR")}</div>
               </div>
               {isFounder ? (
@@ -2548,7 +2555,7 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           {approved.map(r => (
             <div className="access-row" key={r.id}>
               <div>
-                <div className="access-name">{r.name} <span className={"access-type-badge" + (r.type === "editor" ? " editor" : "")}>{r.type === "editor" ? "수정 권한" : "열람 전용"}</span></div>
+                <div className="access-name">{r.name} <span className={"access-type-badge" + (r.type === "editor" ? " editor" : "")}>{r.type === "editor" ? "수정 권한" : "조회 전용"}</span></div>
                 <div className="access-time text-dim">승인됨</div>
               </div>
               {isFounder && (
@@ -2731,22 +2738,21 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
   );
 }
 
-// 참고: 원래 아티팩트 버전엔 "개설자 전용 비밀번호로 다른 기기에서 즉시 재접속"과
-// "동료 교사가 같은 이름으로 재신청하면 기존 승인을 자동으로 이어받는" 기능까지 함께
-// 안내하는 내용이 있었지만, 이 웹사이트 버전에는 그 두 기능 자체가 아직 반영되어 있지
-// 않아 여기서는 뺐다(두 기능을 나중에 이 웹사이트에도 반영하면 그때 안내를 다시 채우면 됨).
+// "개설자 전용 비밀번호로 다른 기기에서 즉시 재접속"(접근 권한 확인 로직)과 "같은 이름 +
+// 같은 권한 종류로 재신청하면 기존 승인을 이어받기"(requestAccess)는 실제로 구현되어 있으므로,
+// 두 기능의 설명을 여기서 함께 안내한다. 동작을 바꾸면 이 안내문도 같이 고쳐야 한다.
 function DeviceSyncGuideModal({ onClose }) {
   const sections = [
     {
       title: "기본 원리",
-      body: "휴대폰·노트북 어디서 접속하든 \"학교 코드\"만 같으면 같은 데이터를 봅니다. 한 기기에서 기록을 입력하면, 몇 초 안에 다른 기기 화면에도 자동으로 반영돼요(따로 저장·새로고침 누를 필요 없음).",
+      body: "휴대폰·노트북 어디서 접속하든 같은 \"학교 코드\"로 들어오면 같은 데이터를 봅니다. 다만 코드만으로는 들어올 수 없고, 개설자는 개설자 전용 비밀번호로, 동료 교사는 접근 신청으로 들어옵니다. 한 기기에서 기록을 입력하면 몇 초 안에 다른 기기 화면에도 자동으로 반영돼요(따로 저장·새로고침 누를 필요 없음).",
     },
     {
       title: "여러 기기를 어떻게 나눠 쓰면 좋은가",
-      body: "예: 노트북은 교무실 책상에 두고 등급표·백업 등 정리 작업을, 휴대폰은 운동장에 들고 나가 실측 기록 입력을 담당하는 식으로 나눠 쓰면 편합니다. 두 기기 모두 같은 코드로 로그인하면 됩니다.",
+      body: "예: 노트북은 교무실 책상에 두고 등급표·백업 등 정리 작업을, 휴대폰은 운동장에 들고 나가 실측 기록 입력을 담당하는 식으로 나눠 쓰면 편합니다. 두 기기 모두 \"코드로 로그인\"에 같은 코드와 개설자 전용 비밀번호를 입력하면 됩니다.",
     },
     {
-      title: "개설자(관리자) 권한을 여러 기기에서 쓰려면",
+      title: "개설자 권한을 여러 기기에서 쓰려면",
       body: "코드를 처음 만들 때 정한 \"개설자 전용 비밀번호\"를 기억해두세요. 다른 기기의 \"코드로 로그인\" 화면에 코드와 이 비밀번호를 입력하면, 별도 승인 없이 바로 개설자 권한으로 들어갈 수 있습니다.",
     },
     {
@@ -2755,11 +2761,11 @@ function DeviceSyncGuideModal({ onClose }) {
     },
     {
       title: "1년 지난 코드는 자동으로 마감됩니다",
-      body: "마감(전체 데이터 삭제)을 깜빡 잊고 넘어가는 경우를 대비해, 코드를 개설한 지 1년이 지나면 자동으로 마감 처리되어 기록·명단·설정이 모두 삭제되고 첫 화면으로 돌아갑니다. 만료 30일 전부터 개설자에게 경고 배너가 뜨고, 계속 쓰실 거라면 \"계속 사용(1년 연장)\" 버튼으로 기한을 늘릴 수 있습니다.",
+      body: "마감(전체 데이터 삭제)을 깜빡 잊고 넘어가는 경우를 대비해, 코드를 개설한 지 1년이 지난 뒤 처음 접속할 때 자동으로 마감 처리되어 기록·명단·설정이 모두 삭제되고 첫 화면으로 돌아갑니다. 만료 30일 전부터 개설자에게 경고 배너가 뜨고, 계속 쓰실 거라면 \"계속 사용(1년 연장)\" 버튼으로 기한을 늘릴 수 있습니다.",
     },
   ];
   const cautions = [
-    "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보가 사라져 다시 접근 절차를 밟아야 할 수 있습니다.",
+    "브라우저의 \"사이트 데이터 지우기\"나 시크릿(비공개) 모드로 접속하면, 이 기기가 승인받았다는 정보와 이 기기에만 저장된 학생 이름표가 사라집니다. 다시 접근 절차를 밟아야 하고, 이름은 \"(이름 미확인 - 이 기기)\"로 보일 수 있습니다.",
     "같은 이름을 쓰는 동료 교사가 두 명 이상이면, 위 \"기존 승인 이어받기\" 기능 때문에 서로 같은 자리를 나눠 쓰게 될 수 있어요. 이름에 학년·반처럼 구분되는 정보를 꼭 포함해 주세요.",
     "개설자 전용 비밀번호는 동료 교사에게 알려주지 마세요 — 이걸 아는 사람은 승인 절차 없이 곧바로 전체 권한을 갖게 됩니다.",
     "JSON 백업(내보내기·불러오기)은 개설자 기기에서만 할 수 있습니다. 여러 기기에서 각자 백업·복원하면 서로 다른 시점의 기록이 뒤섞일 수 있어, 백업은 개설자 한 명이 맡는 것을 권장합니다.",
@@ -2804,7 +2810,7 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
       items: [
         "종목별 실시간 지수·합계 자동계산 — 심박수·부위 점수 등을 입력하면 지수·합계가 즉시 계산됨",
         "종목별 측정 편의성 향상 — 반 전체 동시 측정 타이머, 운동장 코스 계산기 등 현장에서 바로 쓸 수 있는 세팅 제공",
-        "일부 종목 공식음원 탑재 — 왕복오래달리기(음원 또는 영상)·윗몸말아올리기·스텝검사를 화면에서 바로 재생",
+        "종목별 음원 재생 — 윗몸말아올리기·스텝검사는 교육부 공식 음원, 왕복오래달리기는 자체 신호음 또는 유튜브 영상을 화면에서 바로 재생",
       ],
     },
     {
@@ -2818,12 +2824,12 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
     {
       title: "데이터 보안",
       items: [
-        "학교 코드를 모르면 애초에 접근 자체가 불가능",
-        "비밀번호 5회 오답 시 10분간 자동 잠금 — 무작위 대입 시도 차단",
+        "학교 코드와 비밀번호를 모두 알아야 접근 가능 — 코드만으로는 들어올 수 없음",
+        "접근 신청 비밀번호 5회 오답 시 10분간 신청 제한 — 무작위 대입 시도 차단",
         "누가 언제 무엇을 바꿨는지 전부 기록 — 문제 발생 시 추적 가능",
         "승인·비밀번호 변경·마감 같은 민감한 조작은 개설자 1인만 — 통제된 접근 구조",
-        "빔프로젝터 고정모드를 켜면 그 순간부터 자동으로 화면 잠김 — 교사가 자리를 비운 사이 학생의 임의 조작·확인 방지",
-        "공용 PC 자동 잠금(세션 타임아웃) — 로그인 후 약 12분간 조작이 없으면 화면이 자동으로 잠기고, 계속 쓰려면 비밀번호를 다시 입력해야 함",
+        "빔프로젝터 고정모드는 잠긴 전광판 새 창으로 열림 — 교사가 자리를 비운 사이 학생의 임의 조작·확인 방지(원래 창에서는 작업 계속 가능)",
+        "공용 PC 자동 잠금(세션 타임아웃) — 약 12분간 조작이 없으면 화면이 자동으로 잠기고, 계속 쓰려면 접근 신청 비밀번호를 다시 입력해야 함",
         "실시간 측정 중 이름 가림 모드 — 기록관리 화면에서 버튼 하나로 학생 이름을 \"홍*동\" 형태로 가리고 번호로 확인하며 입력 가능",
         "다운로드한 파일 삭제 안내 — 나이스 반영·백업(엑셀/JSON) 파일을 내려받을 때마다, 등록을 마쳤다면 컴퓨터에서 삭제해 달라는 안내가 뜸",
       ],
@@ -2832,7 +2838,7 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
       title: "데이터 보관 기간",
       items: [
         "측정 기록은 \"마감\"을 누르기 전까지 계속 보관됨 — 학기 중에는 자동으로 사라지지 않음",
-        "마감 시 기록과 학생 명단이 함께 즉시 삭제됨",
+        "마감 시 기록·학생 명단·학교 코드가 모두 즉시 삭제됨 — 다음 학기에는 새 코드를 만들어 시작",
         "변경 이력은 최근 300건까지만 보관 — 그 이상은 오래된 순으로 자동 정리",
         "백업 파일은 내려받는 선생님의 개인 컴퓨터에만 저장 — 프로그램이 별도로 영구 보관하지 않음",
       ],
@@ -2841,18 +2847,18 @@ function FeatureUpdatesModal({ isAdmin, onClose }) {
       title: "데이터 관리",
       items: [
         "백업 파일로 데이터 손실 위험 최소화 — 여러 명이 각자 백업·복원하면 최신 기록이 뒤섞일 수 있어 개설자만 가능",
-        "나이스 측정명단 양식 엑셀 파일 첨부로 명단 반영 — 학생관리에서 파일만 올리면(휴대폰은 탭해서 선택) 학년·반·번호·이름을 자동으로 채워줌",
+        "나이스 학생명렬 엑셀로 명단 한 번에 등록 — 학생관리에서 파일만 올리면(휴대폰은 탭해서 선택) 학년·반·번호·이름·성별을 자동으로 채워줌",
         "나이스 '자료올리기'용 엑셀 형식 지원 — 프로그램 내 기록을 토대로 나이스 업로드 양식에 맞춰 채워줌",
-        "마감 시 백업 필수화로 학생 개인정보 최소 보관",
-        "1년 지난 코드는 자동 마감 — 마감을 깜빡 잊어도 개설 1년 후 자동으로 전체 삭제되어 기록이 쌓이지 않음(만료 30일 전부터 경고, 연장 가능)",
+        "마감 전 백업 필수 — 실수로 지워도 되살릴 수 있는 최소한의 안전장치",
+        "1년 지난 코드는 자동 마감 — 마감을 깜빡 잊어도 개설 1년 후 다음 접속 때 자동으로 전체 삭제되어 기록이 쌓이지 않음(만료 30일 전부터 경고, 연장 가능)",
       ],
     },
     {
       title: "학교 상황에 맞추기",
       items: [
         "학교급 선택만으로 학년·등급 기준 자동 적용",
-        "빔프로젝터 자동 잠금 — 학생 정보 노출 방지",
         "모바일 지원 — 현장 어디서든 입력 가능",
+        "홈 화면에 앱처럼 설치 — 접근권한 탭의 모바일 공유 안내에서 설치(아이폰은 공유 → 홈 화면에 추가)",
       ],
     },
   ];
@@ -3039,8 +3045,8 @@ function ShareGuideModal({ workspaceCode, onClose }) {
 
   const steps = [
     { title: "프로그램 링크 열기", body: "스마트폰 브라우저에서 이 프로그램 주소를 직접 입력하거나, 아래 링크 복사 버튼으로 복사해 문자·메신저로 보내서 열어주세요." },
-    { title: "학교 코드 입력", body: `학교 코드("${workspaceCode}")를 입력하면 바로 같은 데이터로 접속됩니다.` },
-    { title: "동료 교사에게는 '접근 신청' 안내", body: "코드를 직접 알려주기보다, 접근권한 탭에서 비밀번호를 정해두고 동료 선생님이 '접근 신청'(이름+코드+비밀번호)으로 들어오게 하는 걸 권장해요." },
+    { title: "코드로 로그인", body: `본인(개설자) 기기라면 첫 화면의 "코드로 로그인"에 학교 코드("${workspaceCode}")와 개설자 전용 비밀번호를 입력하세요. 승인 없이 바로 같은 데이터로 접속됩니다.` },
+    { title: "동료 교사에게는 '접근 신청' 안내", body: "동료 선생님에게는 학교 코드와 접근 신청 비밀번호만 알려주고, 첫 화면의 '접근 신청'(이름+코드+비밀번호)으로 들어오게 하세요. 조회는 바로 되고, 수정 권한은 이 탭에서 승인해야 합니다. 개설자 전용 비밀번호는 알려주지 마세요." },
     { title: "홈 화면에 앱처럼 설치(선택)", body: "아래 '홈 화면에 설치' 버튼을 쓰면 앱처럼 아이콘이 생겨 더 빠르게 열 수 있어요." },
   ];
 
@@ -3057,7 +3063,7 @@ function ShareGuideModal({ workspaceCode, onClose }) {
           </div>
           <div className="warn-note">
             <AlertTriangle size={16} />
-            <span><b>링크</b>(프로그램을 여는 열쇠)와 <b>코드</b>(우리 학교 데이터로 들어가는 열쇠)는 서로 다릅니다. 둘 다 있어야 접속돼요. 코드는 본인 기기 외에는 신뢰하는 동료 교사에게만 알려주세요.</span>
+            <span><b>링크</b>(프로그램 주소)와 <b>학교 코드·비밀번호</b>(우리 학교 데이터로 들어가는 열쇠)는 서로 다릅니다. 링크만으로는 우리 학교 데이터를 볼 수 없어요. 코드와 비밀번호는 신뢰하는 동료 교사에게만 알려주세요.</span>
           </div>
           {steps.map((s, i) => (
             <div className="share-step" key={i}>
@@ -3332,7 +3338,7 @@ function ScoreBoard({ students, records, activeYear, studentValue, studentGrade,
         <div className="empty-state">
           <Trophy size={40} color="var(--text-dim)" />
           <div>아직 이 조건에 해당하는 기록이 없습니다.</div>
-          <div className="empty-sub">기록입력 화면에서 학생 기록을 입력해 주세요.</div>
+          <div className="empty-sub">기록관리 탭에서 학생 기록을 입력해 주세요.</div>
         </div>
       ) : (
         <>
@@ -3525,14 +3531,14 @@ const SHUTTLE_BG_MUSIC_B64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAA
 // 왕복오래달리기는 참고할 공식 영상이 없어 "측정 방법 참고" 칸 자체를 표시하지 않는다(항목을 두지 않으면 칸이 숨겨짐).
 const EVENT_METHOD_INFO = {
   run_walk: { tip: "정해진 거리를 편평한 코스에서 완주하는 데 걸린 시간을 측정합니다. 거리 기준: 초등학생 1000m, 여자 중·고등학생 1200m, 남자 중·고등학생 1600m.", videoUrl: "https://www.youtube.com/watch?v=pY6PWQtSD0I" },
-  step_test: { tip: "스텝박스를 3분간 오르내린 뒤 의자에 앉아, 1분·2분·3분 시점의 심박수를 각각 측정해 입력하면 심폐효율지수(PEI)가 자동으로 계산됩니다.", videoUrl: "https://www.youtube.com/watch?v=mr7qrjq3j0Q" },
+  step_test: { tip: "스텝박스를 3분간 오르내린 뒤 바로 의자에 앉아, 운동 종료 후 1분~1분30초, 2분~2분30초, 3분~3분30초 동안 각각 30초씩 센 맥박 수 3개를 입력하면 심폐효율지수(PEI)가 자동으로 계산됩니다(1분 심박수가 아니라 30초 동안 센 횟수를 입력).", videoUrl: "https://www.youtube.com/watch?v=mr7qrjq3j0Q" },
   sitreach: { tip: "다리를 곧게 뻗고 앉아 상체와 손을 최대한 앞으로 굽혀 뻗은 거리를 측정합니다.", videoUrl: "https://www.youtube.com/watch?v=g0Q9zWuAFUg" },
   flex_total: { tip: "어깨·몸통·옆구리·하체 4부분을 각각 좌우 한 번씩 검사합니다. 양쪽 모두 성공 2점, 한쪽만 성공 1점, 모두 실패 0점이며, 4부분 점수를 합산(0~8점)해 기록합니다.", videoUrl: "https://www.youtube.com/watch?v=r0nVnsqWYpk" },
   pushup: { tip: "머리부터 발끝까지 일직선을 유지하며, 가슴이 봉(또는 바닥)에 가까이 닿을 때까지 팔굽혀펴기를 반복합니다(여학생은 무릎대고 팔굽혀펴기).", videoUrl: "https://www.youtube.com/watch?v=BMRmVDVeUtg" },
   situp: { tip: "무릎을 세우고 누운 자세에서, 3초 간격 신호음에 맞춰 상체를 말아올려 손으로 무릎을 감쌉니다.", videoUrl: "https://www.youtube.com/watch?v=2GVpH3X9k68" },
   gripstrength: { tip: "직립 자세에서 악력계를 손에 맞게 폭을 조절한 뒤, 좌우 각각 2회씩 측정합니다.", videoUrl: "https://www.youtube.com/watch?v=k5r-uNie16c" },
   fifty_m: { tip: "스탠딩스타트 자세로 출발선에서 출발해 50m를 최대한 빠르게 달립니다.", videoUrl: "https://www.youtube.com/watch?v=aYR_B-jyUnM" },
-  longjump: { tip: "제자리에서 한 번만 굴러 최대한 멀리 뛰며, 2회 실시해 좋은 기록을 0.1cm 단위로 채택합니다.", videoUrl: "https://www.youtube.com/watch?v=wPm-zaUI8G0" },
+  longjump: { tip: "출발선에서 두 발을 모으고 제자리에서 한 번에 굴러 최대한 멀리 뛰며, 2회 실시해 좋은 기록을 0.1cm 단위로 채택합니다.", videoUrl: "https://www.youtube.com/watch?v=wPm-zaUI8G0" },
 };
 
 function RecordManagementView({ students, records, activeYear, onSave, studentValue, studentParts, settings, setSettings, showToast }) {
@@ -3681,8 +3687,8 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
     <div className="record-mgmt">
       <div className="panel">
         <h3>종목 선택</h3>
-        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표에서도 숨김 처리됨). BMI·체지방률은 항상 자동으로 빠집니다.</div>
-        <div className="text-dim small-note">심폐지구력·유연성처럼 비슷한 종목이 여러 개면, 다 측정해도 등급엔 1개만 반영됩니다(맨 앞 종목 우선). 특정 종목 하나만 쓰고 싶으면 나머지는 체크를 해제하세요.</div>
+        <div className="text-dim small-note">체크 해제 = 이 종목은 측정 안 함(등급표에서도 숨김 처리됨). BMI·체지방률은 등급이 없는 참고 지표라 체크와 상관없이 항상 입력할 수 있습니다.</div>
+          <div className="text-dim small-note">심폐지구력(왕복오래달리기·오래달리기-걷기·스텝검사)과 유연성(앉아윗몸앞으로굽히기·종합유연성)은 여러 종목을 다 측정해도 종합 순위에는 1개만 반영됩니다(목록에서 앞에 있는 종목 우선). 특정 종목 하나만 쓰고 싶으면 나머지는 체크를 해제하세요.</div>
         <div className="category-groups">
           {EVENT_CATEGORY_GROUPS.map(g => {
             const color = CATEGORY_COLORS[g.category] || "var(--text-dim)";
@@ -3775,7 +3781,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
             </a>
           </div>
           <div className="text-dim small-note">
-            교육부 학생건강정보센터 PAPS 안내자료 기준입니다. 버튼을 누르면 새 탭(또는 유튜브 앱)에서 열립니다. 기기에 유튜브 앱이 깔려 있으면 그 앱으로 넘어가려다 실패해서 버튼이 안 눌리는 것처럼 보일 수 있는데, 그럴 땐 아래 주소를 길게 눌러 복사한 뒤 브라우저에 직접 붙여넣어 열어주세요.
+            교육부 학생건강정보센터 PAPS 안내자료 기준입니다. 버튼을 누르면 새 탭(또는 유튜브 앱)에서 열립니다. 버튼이 반응하지 않으면 아래 주소를 길게 눌러 복사한 뒤 브라우저에 직접 붙여넣어 열어주세요.
           </div>
           <div className="method-ref-url-row">
             <input className="input method-ref-url" readOnly value={EVENT_METHOD_INFO[eventId].videoUrl} onFocus={e => e.target.select()} />
@@ -3831,11 +3837,11 @@ function StepTestRow({ student, activeYear, studentValue, studentParts, onSave, 
   return (
     <div className="drill-student-row step-test-row">
       <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
-      <input className="input drill-student-input" type="number" step="1" value={hr1} placeholder="1분 심박수"
+      <input className="input drill-student-input" type="number" step="1" value={hr1} placeholder="1회 맥박(30초)"
         onChange={e => setHr1(e.target.value)} onBlur={() => commit(hr1, hr2, hr3)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
-      <input className="input drill-student-input" type="number" step="1" value={hr2} placeholder="2분 심박수"
+      <input className="input drill-student-input" type="number" step="1" value={hr2} placeholder="2회 맥박(30초)"
         onChange={e => setHr2(e.target.value)} onBlur={() => commit(hr1, hr2, hr3)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
-      <input className="input drill-student-input" type="number" step="1" value={hr3} placeholder="3분 심박수"
+      <input className="input drill-student-input" type="number" step="1" value={hr3} placeholder="3회 맥박(30초)"
         onChange={e => setHr3(e.target.value)} onBlur={() => commit(hr1, hr2, hr3)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
       <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? "PEI " + existing : "-"}</span>
     </div>
@@ -4655,7 +4661,7 @@ function ClassRunTimer({ eventId, students, activeYear, onSave, showToast, maskN
       </div>
 
       {roster.length === 0 ? (
-        <div className="text-dim small-note">학년·반을 선택하면 그 반 학생 전체(최대 30명 안팎)가 아래 명단에 나타납니다.</div>
+        <div className="text-dim small-note">학년·반을 선택하면 그 반 학생 전체가 아래 명단에 나타납니다.</div>
       ) : (
         <>
           <div className="class-run-sticky-header">
@@ -4898,8 +4904,8 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, settings
           options={[{ id: "students", label: "우리 학생 기록" }, { id: "reference", label: "학년별 참고기준표" }]} />
       </div>
       <div className="text-dim small-note">
-        이 표의 <b>등급</b>은 종목별 기록을 교육부 공식 등급 기준표와 비교한 참고용 정보입니다. 나이스 제출은
-        이 프로그램에 기록한 종목별 실측값을 그대로 사용하며, 등급 표기는 프로그램 내부 참고용일 뿐 제출·합불 판정과는 무관합니다.
+        이 표의 <b>등급</b>은 종목별 기록을 교육부 공식 등급 기준표와 비교한 참고용 정보입니다. 나이스에는
+        이 프로그램에 입력한 종목별 실측값이 그대로 들어가며, 여기 보이는 등급은 프로그램 안에서만 참고하는 값입니다.
       </div>
 
       {mode === "students" && isAdmin && (
@@ -5021,7 +5027,7 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, settings
               </tbody>
             </table>
           </div>
-          <div className="table-foot text-dim">등급은 종목별 참고 정보이며, BMI는 성장 확인용 참고 지표로 등급 산정에 포함되지 않습니다.</div>
+          <div className="table-foot text-dim">등급은 종목별 참고 정보이며, BMI·체지방률은 성장 확인용 참고 지표로 등급 산정에 포함되지 않습니다.</div>
         </div>
       )}
     </div>
@@ -5752,7 +5758,7 @@ function NeisTemplateFiller({ students, records, activeYear, showToast, fillStat
       <h3>학교 시스템(나이스) 양식에 직접 반영하기</h3>
       <div className="text-dim small-note">
         나이스에서 받은 진짜 양식 파일을 여기에 첨부한 뒤 "반영하기"를 누르면, 이 프로그램의
-        기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중" 열은 기록입력 화면에서
+        기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중" 열은 기록관리 탭에서
         입력한 신장·체중 실측값이, "BMI" 열은 그 값으로 계산된 BMI 수치가 채워집니다.
         <b> 실제로 제출하시기 전에 아래 미리보기에서 값이 정확히 채워졌는지 꼭 확인해 주세요.</b>
       </div>
@@ -6148,8 +6154,8 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
 
         <div className="closeout-footer">
           <p className="closeout-footer-text">
-            이 프로그램은 수시로 여유가 생길 때마다 업데이트할 예정입니다.<br />
-            PAPS 측정 업무 간 많은 도움 되셨길 바랍니다.
+            이 프로그램은 앞으로도 틈틈이 업데이트할 예정입니다.<br />
+            PAPS 측정 업무에 많은 도움이 되셨기를 바랍니다.
           </p>
         </div>
       </div>
@@ -6539,7 +6545,7 @@ function ShuttleRunPlayer({ settings, setSettings, onCountChange, onRunningChang
         </div>
       </div>
       <div className="panel">
-        <h3>중학생 표준 셔틀런 신호음</h3>
+        <h3>20m 왕복오래달리기 표준 신호음</h3>
         <div className="preset-info">
           <div className="preset-row"><span>기준 방식</span><span>20m 셔틀런(Léger·PACER 국제 표준 프로토콜)</span></div>
           <div className="preset-row"><span>왕복 거리</span><span>{distance}m</span></div>
@@ -6549,7 +6555,7 @@ function ShuttleRunPlayer({ settings, setSettings, onCountChange, onRunningChang
         </div>
         <div className="warn-note">
           <AlertTriangle size={16} />
-          <span>중학생 현장 측정에 널리 쓰이는 국제 표준 진행 방식을 그대로 적용해 별도 설정 없이 바로 사용하도록 맞춰두었습니다. 학교마다 사용하는 공식 CD/음원과 초 단위까지 완전히 동일하지는 않을 수 있으니, 정식 기록으로 인정되는 측정에는 학교 지정 음원도 함께 확인해 주세요.</span>
+          <span>학교 현장 측정에 널리 쓰이는 국제 표준 진행 방식을 그대로 적용해 별도 설정 없이 바로 사용하도록 맞춰두었습니다. 학교마다 사용하는 공식 CD/음원과 초 단위까지 완전히 동일하지는 않을 수 있으니, 정식 기록으로 인정되는 측정에는 학교 지정 음원도 함께 확인해 주세요.</span>
         </div>
       </div>
         </>
@@ -6811,11 +6817,11 @@ function StepTestPlayer() {
         <div className="preset-info">
           <div className="preset-row"><span>진행 방식</span><span>3분간 스텝박스 오르내리기(교육부 공식 음원 재생 시간에 맞춤)</span></div>
           <div className="preset-row"><span>스텝박스 높이</span><span>초등 5~6학년 20.3cm · 중(남·여)·고(여) 45.7cm · 고(남) 50.8cm</span></div>
-          <div className="preset-row"><span>측정</span><span>스텝운동 종료 후 의자에 앉아 안정을 취하며 심박수 측정</span></div>
+          <div className="preset-row"><span>측정</span><span>종료 후 의자에 앉아 1분~1분30초, 2분~2분30초, 3분~3분30초에 각각 30초간 맥박 수 측정</span></div>
         </div>
         <div className="warn-note">
           <AlertTriangle size={16} />
-          <span>교육부 학생건강정보센터의 공식 스텝검사 음원을 그대로 재생합니다. 재생이 끝나면(3분) 바로 의자에 앉아 안정 심박수 측정을 시작해 주세요.</span>
+          <span>교육부 학생건강정보센터의 공식 스텝검사 음원을 그대로 재생합니다. 재생이 끝나면(3분) 바로 의자에 앉게 하고, 위 세 구간의 맥박 수를 기록관리의 입력칸에 그대로 입력해 주세요.</span>
         </div>
       </div>
     </div>
@@ -6984,8 +6990,10 @@ function PapsStyles({ children }) {
         .gate-notes-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; }
         .gate-notes-panel { text-align: left; margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
         .gate-notes-panel .gate-code-warn, .gate-notes-panel .gate-pw-hint { margin: 0; }
-        .gate-notes-panel .text-dim.small-note { display: flex; gap: 6px; align-items: flex-start; }
-        .gate-notes-panel .text-dim.small-note svg { flex-shrink: 0; margin-top: 2px; }
+        /* 굵은 제목(<b>)과 본문이 한 문단으로 이어지도록 flex 대신 일반 문단 흐름을 쓴다.
+           flex로 두면 좁은 화면에서 제목이 한 글자씩 세로로 쪼개져 보인다. */
+        .gate-notes-panel .text-dim.small-note { display: block; }
+        .gate-notes-panel .text-dim.small-note svg { vertical-align: -2px; margin-right: 4px; }
         @media (max-width: 420px) {
           .gate-input { font-size: 17px; }
         }
