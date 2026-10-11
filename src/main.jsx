@@ -9,6 +9,8 @@ import { initAnalyticsIfSupported } from "./firebase.js";
 const params = new URLSearchParams(window.location.search);
 const presentParam = params.get("present") === "1";
 const codeParam = params.get("code") || null;
+// 프로그램 안 "사용 가이드"의 "연습모드 새 창으로 열기"는 ?practice=1 로 새 창을 연다.
+const practiceParam = params.get("practice") === "1" && !presentParam;
 
 initAnalyticsIfSupported();
 
@@ -17,6 +19,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <PapsApp
       initialWorkspaceCode={presentParam ? codeParam : null}
       forcePresentation={presentParam}
+      autoStartPractice={practiceParam}
     />
   </React.StrictMode>
 );

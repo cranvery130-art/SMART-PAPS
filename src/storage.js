@@ -13,6 +13,31 @@ import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 
 const KV_COLLECTION = "kv";
 
+// ---- 연습모드 ----
+// 첫 화면의 "연습모드 체험"으로 들어가면 이 특별한 학교 코드를 쓴다. 코드에 "/"가 들어 있어서
+// 선생님이 입력한 코드(sanitizeWorkspaceCode가 "/"를 "-"로 바꾼다)와는 절대 겹치지 않는다.
+// 이 코드로 끝나는 저장 키는 shared 여부와 상관없이 서버(Firestore)로 보내지 않고, 이 기기의
+// localStorage에만 따로 저장한다. 그래서 연습 중에 무엇을 하든 실제 학교 데이터와 섞이지 않는다.
+export const PRACTICE_CODE = "연습모드/체험";
+const PRACTICE_PREFIX = "paps-practice:";
+function isPracticeKey(key) {
+  return String(key).endsWith(":" + PRACTICE_CODE);
+}
+// 연습 데이터를 모두 지운다(연습 시작·초기화·종료 때 사용).
+export function clearPracticeStore() {
+  try {
+    const ls = window.localStorage;
+    const doomed = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k && (k.startsWith(PRACTICE_PREFIX) || isPracticeKey(k))) doomed.push(k);
+    }
+    doomed.forEach(k => ls.removeItem(k));
+  } catch (e) {
+    // localStorage를 쓸 수 없는 환경이면 지울 것도 없다.
+  }
+}
+
 function sanitizeDocId(key) {
   // Firestore 문서 ID는 "/"를 쓸 수 없고 1500바이트 이하여야 한다. 원래 저장 키들은
   // "paps:xxx:yyy" 형태의 콜론 구분 문자열이라 대부분 그대로 써도 안전하지만, 혹시 모를
@@ -47,6 +72,7 @@ function safeLocalDelete(key) {
 
 export const storage = {
   async get(key, shared) {
+    if (isPracticeKey(key)) return safeLocalGet(PRACTICE_PREFIX + key);
     if (!shared) return safeLocalGet(key);
     try {
       const ref = doc(db, KV_COLLECTION, sanitizeDocId(key));
@@ -59,6 +85,7 @@ export const storage = {
     }
   },
   async set(key, value, shared) {
+    if (isPracticeKey(key)) return safeLocalSet(PRACTICE_PREFIX + key, String(value));
     if (!shared) return safeLocalSet(key, value);
     try {
       const ref = doc(db, KV_COLLECTION, sanitizeDocId(key));
@@ -69,6 +96,7 @@ export const storage = {
     }
   },
   async delete(key, shared) {
+    if (isPracticeKey(key)) return safeLocalDelete(PRACTICE_PREFIX + key);
     if (!shared) return safeLocalDelete(key);
     try {
       const ref = doc(db, KV_COLLECTION, sanitizeDocId(key));
