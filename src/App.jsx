@@ -727,31 +727,31 @@ async function seedPracticeWorkspace() {
 /* ============================== 메인 앱 ============================== */
 
 const SCREEN_MODE_KEY = "smartpaps_screen_mode";
-// 화면 모드: 기본(양쌤스튜디오 톤의 밝은 화면), 어두운 화면, 눈 보호용 두 가지를 둔다.
-//  - ys: 양쌤스튜디오 홈페이지와 같은 따뜻한 종이색 + 남색 + 코트 주황 화면(기본)
+// 화면 모드: 눈 보호(기본), 야간 눈 보호, 양쌤 컬러, 어두운 화면 네 가지를 둔다.
+//  - paper: 밝은 곳(교실·체육관·운동장 스마트폰)에서 쓰는 따뜻한 종이색 눈 보호 화면(기본)
+//  - night: 어두운 곳·저녁에 쓰는, 밝기와 푸른빛을 크게 낮춘 눈 보호 화면
+//  - ys: 양쌤스튜디오 홈페이지와 같은 종이색 + 남색 + 코트 주황 화면
 //  - dark: 예전 기본이던 어두운 화면
-//  - paper: 밝은 곳(교실·체육관·운동장 스마트폰)에서 쓰는 따뜻한 종이색 화면
-//  - night: 어두운 곳·저녁에 쓰는, 밝기와 푸른빛을 크게 낮춘 화면
 const SCREEN_MODES = [
-  { id: "ys", label: "기본 · 양쌤" },
-  { id: "dark", label: "어두운 화면" },
-  { id: "paper", label: "눈 보호 · 종이" },
+  { id: "paper", label: "눈 보호 (기본)" },
   { id: "night", label: "눈 보호 · 야간" },
+  { id: "ys", label: "양쌤 컬러" },
+  { id: "dark", label: "어두운 화면" },
 ];
 function readScreenMode() {
   try {
     let v = window.localStorage.getItem(SCREEN_MODE_KEY);
     if (v === "comfort") v = "night"; // 직전 버전 이름 호환
-    if (v === "default") v = "ys"; // 예전 기본(어두운 화면)은 새 기본으로 옮겨요. 어두운 화면은 메뉴에서 다시 고를 수 있어요
+    if (v === "default") v = "paper"; // 예전 기본(어두운 화면)은 새 기본(눈 보호)으로 옮겨요. 어두운 화면은 메뉴에서 다시 고를 수 있어요
     if (SCREEN_MODES.some(m => m.id === v)) return v;
   } catch (e) {}
-  return "ys";
+  return "paper";
 }
 
 export default function PapsApp({ initialWorkspaceCode = null, forcePresentation = false, autoStartPractice = false } = {}) {
   const [workspaceCode, setWorkspaceCode] = useState(initialWorkspaceCode);
   const isPractice = workspaceCode === PRACTICE_CODE;
-  // 화면 모드(기본 · 양쌤 / 어두운 화면 / 눈 보호 · 종이 / 눈 보호 · 야간)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
+  // 화면 모드(눈 보호(기본) / 눈 보호 · 야간 / 양쌤 컬러 / 어두운 화면)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
   // 아니라 "이 기기"에만 저장한다. 그래서 개설자·동료 교사 누구나 각자 바꿀 수 있고, 첫 화면과
   // 같은 기기에서 연 빔프로젝터 새 창에도 똑같이 적용된다.
   const [screenMode, setScreenMode] = useState(readScreenMode);
@@ -2950,7 +2950,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           <span className="now-text">{nowText}</span>
         </div>
         {onChangeScreenMode && (
-          <label className={"screen-mode-select" + (screenMode !== "ys" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용됩니다">
+          <label className={"screen-mode-select" + (screenMode !== "paper" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용됩니다">
             <Eye size={14} />
             <select value={screenMode} onChange={e => onChangeScreenMode(e.target.value)} aria-label="화면 모드 선택">
               {SCREEN_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -7872,7 +7872,7 @@ function PapsStyles({ children }) {
         }
         html[data-eye-care] .tier-1 .podium-value { color: var(--gold); }
 
-        /* ================= 눈 보호 · 종이 =================
+        /* ================= 눈 보호 (기본, paper) =================
            밝은 장소용. 형광등·햇빛 아래에선 어두운 화면보다 밝은 바탕의 진한 글자가 더 편하게
            읽힌다. 새하얀 바탕 대신 누런 종이색, 새까만 글자 대신 짙은 갈색 글자를 써서
            눈부심과 푸른빛을 줄이고, 강조색은 눈에 편한 녹색 계열 한 가지만 쓴다. */
@@ -7942,7 +7942,7 @@ function PapsStyles({ children }) {
         html[data-screen-mode="paper"] .tab-danger.active,
         html[data-screen-mode="ys"] .tab-danger.active { color: #9A2F2A; }
 
-        /* ================= 기본 · 양쌤 =================
+        /* ================= 양쌤 컬러 (ys) =================
            양쌤스튜디오 홈페이지와 같은 톤: 따뜻한 종이색 바탕, 남색 글자, 코트 주황 강조.
            밝은 화면용 보정(안내 문구 색 등)은 위 '종이' 모드 규칙을 함께 쓰고, 색 값만 여기서 덮어써요. */
         html[data-screen-mode="ys"] .paps-app,
