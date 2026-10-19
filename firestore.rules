@@ -2,28 +2,214 @@ rules_version = '2';
 
 // SMART PAPS Firestore 보안 규칙
 //
-// 이 프로그램은 Firebase 로그인(Auth)을 쓰지 않고 "학교 코드 + 접근 신청 비밀번호"라는
-// 자체 방식으로 접근을 통제한다. 그래서 이 규칙은 Firebase Auth 기반의 세밀한 사용자별
-// 권한 검사를 하지 못한다 — 대신 아래 두 가지 최소한의 안전장치만 건다.
-//
-//  1) 이 프로그램이 실제로 쓰는 키 이름(모두 "paps:"로 시작)만 읽고 쓸 수 있다. 그 밖의
-//     임의의 문서 이름은 이 프로젝트를 통해 저장할 수 없다 — 즉, 이 Firestore 프로젝트가
-//     이 프로그램과 무관한 용도로 함부로 쓰이는 것을 막는다.
-//  2) 그 안에서는 "학교 코드를 아는 사람만 그 학교 데이터를 읽고 쓸 수 있다"는, 원래
-//     Claude 아티팩트 버전과 동일한 신뢰 모델을 그대로 유지한다(=코드 자체가 비밀번호
-//     역할을 겸함). 학생 실명은애초에 이 데이터베이스에 저장되지 않는다(App.jsx의
-//     익명화 로직 참고).
-//
-// 더 강한 보안(예: 학교별로 진짜 로그인 계정을 두고 완전히 분리하는 방식)을 원하면
-// Firebase Authentication을 도입하고 이 규칙을 그에 맞게 다시 작성해야 한다. 학교
-// 정식 도입 전에는 학교·교육청 개인정보 담당자와 한 번 확인해 보는 것을 권장한다
-// (준비 브리핑 문서 6번·8번 항목 참고).
+// ───────────────────────────────────────────────────────────────
+// [보안 구조] (2026-10 개편)
+//  - 모든 기기는 Firebase 익명 로그인을 한다(이름·이메일 없음). 그 기기 고유번호(uid)로 권한을 구분한다.
+//  - 비밀번호는 원문으로 저장하지 않는다. SHA-256 해시만 schools/{코드}/meta/secret에 두고,
+//    그 문서는 아무도 읽을 수 없다.
+//  - 들어올 때 기기는 "내가 계산한 해시"를 claims/{uid}에 쓰고, 이 규칙이 저장된 해시와 같은지
+//    비교해 members/{uid}(구성원 문서)를 만들게 한다. 그래서 코드를 알아도 비밀번호를 알아낼 수
+//    없고, 개설자·수정 권한자·조회자 구분을 서버가 직접 지킨다. 틀린 비밀번호는 5초에 한 번만
+//    다시 시도할 수 있다.
+//  - 학생 명단·등급 기준·설정(data/config)과 측정 기록(data/records)은 승인된 구성원만 읽고,
+//    개설자·승인된 수정 권한자만 쓴다. 변경 이력·백업 이력은 개설자·수정 권한자만 읽고 쓴다.
+//  - 예전 방식(kv/paps:config:{코드} 문서 안에 비밀번호 원문이 있던 코드)은 개설자가 새 버전에서
+//    한 번 로그인하면 새 방식으로 옮겨지고 예전 문서는 지워진다. 옮기기 전에도 예전 문서는
+//    그 코드의 개설자 말고는 읽을 수 없다.
+//  - 학생 실명은 애초에 이 데이터베이스에 저장되지 않는다(App.jsx의 익명화 로직 참고).
+// ───────────────────────────────────────────────────────────────
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /kv/{docId} {
-      allow read, write: if docId.matches('paps:.*') && docId.size() < 300;
+
+    function signedIn() {
+      return request.auth != null;
     }
-    // 그 밖의 모든 경로는 기본적으로 차단한다.
+    function validCode(code) {
+      return code.size() >= 1 && code.size() <= 40;
+    }
+    function memberPath(code, uid) {
+      return /databases/$(database)/documents/schools/$(code)/members/$(uid);
+    }
+    function claimPath(code, uid) {
+      return /databases/$(database)/documents/schools/$(code)/claims/$(uid);
+    }
+    function secretPath(code) {
+      return /databases/$(database)/documents/schools/$(code)/meta/secret;
+    }
+    function infoPath(code) {
+      return /databases/$(database)/documents/schools/$(code)/meta/info;
+    }
+    function legacyConfigPath(code) {
+      return /databases/$(database)/documents/kv/$('paps:config:' + code);
+    }
+
+    // 이 요청 직전 상태 기준의 내 구성원 정보
+    function me(code) {
+      return get(memberPath(code, request.auth.uid)).data;
+    }
+    function isMember(code) {
+      return signedIn() && exists(memberPath(code, request.auth.uid));
+    }
+    function canView(code) {
+      return isMember(code) && me(code).status == 'approved';
+    }
+    function canEdit(code) {
+      return canView(code) && me(code).type in ['founder', 'editor'];
+    }
+    function isFounder(code) {
+      return canView(code) && me(code).type == 'founder';
+    }
+
+    // 예전 방식 코드: kv에 설정 문서가 남아 있고 아직 secret이 없음
+    function isLegacy(code) {
+      return !exists(secretPath(code)) && exists(legacyConfigPath(code));
+    }
+    // 예전 설정(JSON 문자열) 안의 "founderPassword":"..." 값. 키가 정확히 한 번 나올 때만 꺼낸다.
+    function legacyFounderPassword(code) {
+      let parts = get(legacyConfigPath(code)).data.value.split('"founderPassword":"');
+      return parts.size() == 2 ? parts[1].split('"')[0] : '';
+    }
+
+    // 내가 이번에 제출한 해시·예전 비밀번호(같은 묶음 쓰기 포함)
+    function hasClaim(code) {
+      return existsAfter(claimPath(code, request.auth.uid));
+    }
+    function myClaim(code) {
+      return getAfter(claimPath(code, request.auth.uid)).data;
+    }
+    function founderOk(code) {
+      return hasClaim(code) && (
+        (existsAfter(secretPath(code)) && myClaim(code).h == getAfter(secretPath(code)).data.founder)
+        || (isLegacy(code) && myClaim(code).get('legacy', '') != ''
+            && myClaim(code).legacy == legacyFounderPassword(code))
+      );
+    }
+    function viewerOk(code) {
+      return hasClaim(code)
+        && existsAfter(secretPath(code))
+        && getAfter(secretPath(code)).data.viewer != ''
+        && myClaim(code).h == getAfter(secretPath(code)).data.viewer;
+    }
+
+    function entryKeysOk(d) {
+      return d.keys().hasOnly(['type', 'status', 'name', 'submittedAt', 'decidedAt', 'verifiedAt'])
+        && d.name is string && d.name.size() <= 60;
+    }
+    // 내가 내 구성원 문서를 만들거나 바꿀 때 허용되는 모양
+    function selfEntryOk(code, d) {
+      return entryKeysOk(d) && (
+        (d.type == 'founder' && d.status == 'approved' && founderOk(code))
+        || (d.type == 'viewer' && d.status == 'approved' && viewerOk(code))
+        || (d.type == 'editor' && d.status == 'pending' && viewerOk(code))
+      );
+    }
+    // 개설자가 구성원(자기 자신 포함)을 바꿀 때 허용되는 모양
+    function entryShapeOk(d) {
+      return entryKeysOk(d)
+        && d.type in ['founder', 'editor', 'viewer']
+        && d.status in ['approved', 'pending', 'denied'];
+    }
+    function secretShapeOk(d) {
+      return d.keys().hasOnly(['founder', 'viewer'])
+        && d.founder is string && d.founder.size() == 64
+        && d.viewer is string && (d.viewer == '' || d.viewer.size() == 64);
+    }
+    function infoShapeOk(code, d) {
+      return d.keys().hasOnly(['createdAt', 'v', 'viewerOn'])
+        && d.viewerOn is bool
+        && d.viewerOn == (getAfter(secretPath(code)).data.viewer != '');
+    }
+    // 아무도 쓰지 않은 새 코드(예전 방식 코드도 아님)
+    function brandNew(code) {
+      return !exists(infoPath(code)) && !exists(secretPath(code)) && !exists(legacyConfigPath(code));
+    }
+
+    // 코드가 있는지 확인하는 표시 + 접근 신청이 켜져 있는지(비밀번호 없음)
+    match /schools/{code}/meta/info {
+      allow get: if signedIn() && validCode(code);
+      allow create: if signedIn() && validCode(code)
+        && existsAfter(secretPath(code))
+        && infoShapeOk(code, request.resource.data)
+        && (brandNew(code) || isFounder(code));
+      allow update: if isFounder(code) && infoShapeOk(code, request.resource.data);
+      allow delete: if isFounder(code);
+    }
+
+    // 비밀번호 해시: 아무도 읽을 수 없음
+    match /schools/{code}/meta/secret {
+      allow read: if false;
+      allow create: if signedIn() && validCode(code)
+        && secretShapeOk(request.resource.data)
+        && existsAfter(infoPath(code))
+        && (brandNew(code) || isFounder(code));
+      allow update: if isFounder(code) && secretShapeOk(request.resource.data);
+      allow delete: if isFounder(code);
+    }
+
+    // 실제 데이터(값은 JSON 문자열): config(명단·등급 기준·설정), records(측정 기록),
+    // auditlog(변경 이력), backuplog(백업 이력)
+    match /schools/{code}/data/{name} {
+      allow get: if validCode(code) && (
+        (name in ['config', 'records'] && canView(code))
+        || (name in ['auditlog', 'backuplog'] && canEdit(code))
+      );
+      allow create, update: if validCode(code) && canEdit(code)
+        && name in ['config', 'records', 'auditlog', 'backuplog']
+        && request.resource.data.keys().hasOnly(['value', 'updatedAt'])
+        && request.resource.data.value is string;
+      allow delete: if isFounder(code);
+    }
+
+    // 들어올 때 제출하는 해시(본인만 쓰기, 5초에 한 번). 내용은 아무도 하나씩 읽지 못하고,
+    // 개설자만 마감 때 지우려고 목록을 볼 수 있다.
+    match /schools/{code}/claims/{uid} {
+      allow get: if false;
+      allow list: if isFounder(code);
+      allow create, update: if validCode(code) && signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['h', 'at', 'legacy'])
+        && request.resource.data.h is string && request.resource.data.h.size() <= 64
+        && request.resource.data.get('legacy', '') is string
+        && request.resource.data.get('legacy', '').size() <= 100
+        && request.resource.data.at == request.time
+        && (resource == null || request.time > resource.data.at + duration.value(5, 's'));
+      // 본인이 지우면 5초 제한이 풀리므로, 지우기는 개설자만(마감·옮기기 때)
+      allow delete: if isFounder(code);
+    }
+
+    // 구성원(개설자·수정 권한자·조회자·승인 대기·거절)
+    match /schools/{code}/members/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || canEdit(code));
+      allow list: if canEdit(code);
+      allow create: if validCode(code) && signedIn() && request.auth.uid == uid
+        && selfEntryOk(code, request.resource.data);
+      allow update: if validCode(code) && signedIn() && (
+        (request.auth.uid == uid && selfEntryOk(code, request.resource.data))
+        // 화면 잠금 풀기: 접근 신청 비밀번호가 맞을 때 확인 시각만 남김
+        || (request.auth.uid == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verifiedAt'])
+            && viewerOk(code))
+        || (isFounder(code) && entryShapeOk(request.resource.data))
+      );
+      allow delete: if signedIn() && (request.auth.uid == uid || isFounder(code));
+    }
+
+    // kv 컬렉션: 방문 집계(paps:stats:*)와 예전 방식 문서
+    match /kv/{docId} {
+      // 방문 집계: 로그인한 기기라면 숫자 하나를 읽고 쓸 수 있음
+      allow get: if signedIn() && docId.matches('paps:stats:.*') && docId.size() < 300;
+      allow create, update: if signedIn() && docId.matches('paps:stats:.*') && docId.size() < 300
+        && request.resource.data.keys().hasOnly(['value', 'updatedAt'])
+        && request.resource.data.value is string
+        && request.resource.data.value.size() < 30;
+      // 예전 방식 문서: 그 코드의 개설자만 읽고 지울 수 있음(옮기기용). 없는 문서 확인은 누구나.
+      allow get: if signedIn() && docId.matches('paps:(config|records|access|auditlog|backuplog):.+')
+        && (resource == null
+            || isFounder(docId.replace('^paps:(config|records|access|auditlog|backuplog):', '')));
+      allow delete: if signedIn() && docId.matches('paps:(config|records|access|auditlog|backuplog):.+')
+        && isFounder(docId.replace('^paps:(config|records|access|auditlog|backuplog):', ''));
+    }
+
+    // 그 밖의 모든 경로는 차단한다.
     match /{document=**} {
       allow read, write: if false;
     }
