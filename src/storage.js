@@ -6,7 +6,8 @@
 //  - shared === true  → 여러 사람(학교 코드로 접속하는 모든 기기)이 함께 보는 데이터.
 //                        저장 키에 따라 Firestore의 학교별 문서로 나눠 저장한다(아래 sharedRef).
 //                          paps:config:{코드}    → schools/{코드}/data/config   (명단·등급 기준·설정, 비밀번호 없음)
-//                          paps:records:{코드}   → schools/{코드}/data/records  (측정 기록)
+//                          paps:records:{코드}   → schools/{코드}/data/records  (측정 기록. 신장·체중·BMI·체지방률 값은
+//                                                    App.jsx가 보내기 전에 빼서 이 기기에만 둔다 — healthLocal.js)
 //                          paps:auditlog:{코드}  → schools/{코드}/data/auditlog (변경 이력)
 //                          paps:backuplog:{코드} → schools/{코드}/data/backuplog(백업 이력)
 //                          paps:stats:*          → kv/{키}                      (방문 집계)
