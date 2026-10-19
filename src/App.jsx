@@ -458,6 +458,74 @@ const ANONYMOUS_NAME_PLACEHOLDER = "(이름 미확인 - 이 기기)";
 // 건강 기록(BMI·체지방률)을 다른 기기에서 입력해 값이 이 기기에 없을 때 보이는 표시
 const HEALTH_ELSEWHERE_LABEL = "이 기기에 없음";
 const HEALTH_ELSEWHERE_TITLE = "다른 기기에서 측정해 입력했어요. 건강 정보(신장·체중·BMI·체지방률)는 서버에 올리지 않고 입력한 기기에만 저장돼요.";
+
+// ---- 변경 이력에도 학생 실명을 넣지 않는다 ----
+// 서버(Firestore)의 변경 이력에는 학생 id와 "학년-반-번호"만 남기고, 화면에 보여줄 때 이 기기의
+// 이름표로 이름을 찾아 붙인다. 이름표가 없는 기기에서는 "1-1-3 (이름 미확인 - 이 기기)"처럼 보인다.
+function studentLabel(s) {
+  return s ? `${s.grade}-${s.classNum}-${s.number}` : "";
+}
+const AUDIT_LABEL_LIMIT = 30;
+// 학생 추가·삭제 이력 한 건(이름 없이 인원수·학년-반-번호·id만)
+function rosterAuditEntry(by, verb, list) {
+  const labels = list.map(studentLabel);
+  const shown = labels.slice(0, AUDIT_LABEL_LIMIT).join(", ") + (labels.length > AUDIT_LABEL_LIMIT ? ` 외 ${labels.length - AUDIT_LABEL_LIMIT}명` : "");
+  return {
+    type: "access", ts: Date.now(), by, nameless: true,
+    studentIds: list.slice(0, 200).map(s => s.id),
+    message: `${by}님이 학생 ${list.length}명(${shown})을(를) ${verb}함`,
+  };
+}
+// 화면 표시용: 이력 속 학생을 이 기기 이름표로 풀어 쓴다.
+function auditStudentText(a, nameMap) {
+  const name = (a.studentId && nameMap[a.studentId]) || a.studentName || "";
+  const label = a.studentLabel || "";
+  if (name) return label ? `${name}(${label})` : name;
+  if (label) return `${label} ${ANONYMOUS_NAME_PLACEHOLDER}`;
+  return a.studentId ? ANONYMOUS_NAME_PLACEHOLDER : "(삭제된 학생)";
+}
+// 서버 변경 이력에서 학생 이름을 빼낸 사본(한 번만 하는 정리용). 이름은 이 기기 이름표에 없으면
+// 거기로 옮겨 두고, 이름 말고 다른 내용(누가·언제·종목·값·인원수)은 그대로 둔다.
+// 결과: { list, changed }
+function stripAuditStudentNames(code, list, students) {
+  const byId = Object.fromEntries((students || []).map(s => [s.id, s]));
+  const nameMap = loadLocalNameMap(code);
+  const idsByName = {};
+  (students || []).forEach(s => {
+    const n = nameMap[s.id] || (s.name !== ANONYMOUS_NAME_PLACEHOLDER ? s.name : "");
+    if (n) (idsByName[n] = idsByName[n] || []).push(s.id);
+  });
+  let changed = false, nameMapChanged = false;
+  const next = (list || []).map(e => {
+    if (!e || e.nameless) return e;
+    if (e.type === "record" && "studentName" in e) {
+      const { studentName, ...rest } = e;
+      const st = byId[e.studentId];
+      if (st && studentName && studentName !== ANONYMOUS_NAME_PLACEHOLDER && !nameMap[st.id]) {
+        nameMap[st.id] = studentName;
+        nameMapChanged = true;
+      }
+      changed = true;
+      return { ...rest, nameless: true, ...(st && !rest.studentLabel ? { studentLabel: studentLabel(st) } : {}) };
+    }
+    const m = e.type === "access" && typeof e.message === "string" ? e.message.match(/^(.*)님이 학생 (.+)을\(를\) (추가|삭제)함$/) : null;
+    if (m) {
+      const names = m[2].split(", ");
+      const ids = [];
+      names.forEach(n => { const found = idsByName[n]; if (found && found.length === 1) ids.push(found[0]); });
+      const labels = ids.map(id => studentLabel(byId[id])).slice(0, AUDIT_LABEL_LIMIT);
+      changed = true;
+      return {
+        ...e, nameless: true,
+        ...(ids.length > 0 ? { studentIds: ids.slice(0, 200) } : {}),
+        message: `${m[1]}님이 학생 ${names.length}명${labels.length > 0 ? `(${labels.join(", ")}${ids.length > labels.length ? " 외" : ""})` : ""}을(를) ${m[3]}함`,
+      };
+    }
+    return e;
+  });
+  if (nameMapChanged) saveLocalNameMap(code, nameMap);
+  return { list: next, changed };
+}
 // 화면이 알고 있는 학생 이름을 이 기기의 로컬 이름표에 즉시(동기적으로) 반영한다.
 // 이름을 입력/추가한 시점에 곧바로 호출해야 한다 — 네트워크 저장(Firestore 왕복)이 끝나길
 // 기다렸다가 반영하면, 그 사이에 탭을 닫아버릴 경우 이름이 이 기기에 전혀 남지 않게 된다
@@ -539,11 +607,11 @@ async function saveRecordsRemote(code, obj) {
 }
 
 // 한 번만 하는 정리: 예전 버전이 서버(Firestore)에 올려 둔 건강 값(신장·체중·BMI·체지방률)을
-// 이 기기로 옮기고 서버에서는 지운다. 개설자·수정 권한자가 코드를 열 때 실행한다.
+// 이 기기로 옮기고 서버에서는 지운다. 변경 이력에 남아 있던 학생 실명도 함께 빼낸다. 개설자·수정 권한자가 코드를 열 때 실행한다.
 // 순서: ① 이 기기에 먼저 저장 → ② 다시 읽어 확인 → ③ 서버 최신 기록을 다시 받아 값만 빼고 저장.
 // 확인이 안 되면 서버는 건드리지 않는다. 옮길 값이 없으면 아무것도 하지 않으므로 몇 번 실행해도 같다.
 // 결과: { moved: 옮긴 기록 수, failed: 실패 여부 }
-async function moveServerHealthToThisDevice(code) {
+async function moveServerHealthToThisDevice(code, students) {
   let moved = 0;
   try {
     const r = await storage.get(recordsKey(code), true);
@@ -561,12 +629,23 @@ async function moveServerHealthToThisDevice(code) {
       if (!ok) return { moved: 0, failed: true };
       moved = Object.keys(more).length;
     }
+    // 변경 이력: 건강 값은 이 기기로 옮기고, 학생 실명은 빼낸다(이름표에 없던 이름은 이 기기 이름표로).
     const a = await storage.get(auditLogKey(code), true);
-    const auditList = a ? JSON.parse(a.value) : [];
-    if (Array.isArray(auditList) && auditHasServerHealth(auditList)) {
-      const strippedAudit = stripHealthAudit(code, auditList);
-      if (!strippedAudit) return { moved, failed: true };
-      await storage.set(auditLogKey(code), JSON.stringify(strippedAudit), true);
+    let auditList = a ? JSON.parse(a.value) : [];
+    if (Array.isArray(auditList)) {
+      let auditChanged = false;
+      if (auditHasServerHealth(auditList)) {
+        const strippedAudit = stripHealthAudit(code, auditList);
+        if (!strippedAudit) return { moved, failed: true };
+        auditList = strippedAudit;
+        auditChanged = true;
+      }
+      const named = stripAuditStudentNames(code, auditList, students);
+      if (named.changed) {
+        auditList = named.list;
+        auditChanged = true;
+      }
+      if (auditChanged && !(await storage.set(auditLogKey(code), JSON.stringify(auditList), true))) return { moved, failed: true };
     }
     return { moved, failed: false };
   } catch (e) {
@@ -1401,12 +1480,12 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       // 예전 버전이 서버에 올려 둔 건강 값(신장·체중·BMI·체지방률)이 남아 있으면, 기록을 쓸 수 있는
       // 기기(개설자·수정 권한)가 열 때 이 기기로 옮기고 서버에서는 지운다(한 번만, 이 기기 저장 확인 후).
       if (role === "admin" && !isPractice) {
-        const moveResult = await moveServerHealthToThisDevice(workspaceCode);
+        const moveResult = await moveServerHealthToThisDevice(workspaceCode, cfg?.students || []);
         if (moveResult.moved > 0) {
           appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님 기기로 건강 기록(신장·체중·BMI·체지방률) ${moveResult.moved}건을 옮기고 서버에서 지움` });
           showToast(`서버에 있던 건강 기록 ${moveResult.moved}건을 이 기기로 옮겼어요. 이제 이 기기에만 저장돼요. 데이터 백업 탭에서 파일로 보관해 두세요.`, "ok");
         } else if (moveResult.failed) {
-          showToast("서버에 남은 건강 기록을 이 기기로 옮기지 못했어요(서버 기록은 그대로 둠). 잠시 뒤 다시 열어 주세요.", "warn");
+          showToast("서버에 남은 건강 기록·이력 정리를 마치지 못했어요(서버 기록은 그대로 둠). 잠시 뒤 다시 열어 주세요.", "warn");
         }
       }
       const recs = await loadRecordsRemote(workspaceCode);
@@ -1654,7 +1733,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         type: "record",
         ts: Date.now(),
         by: myDisplayName,
-        studentName: student ? student.name : "(삭제된 학생)",
+        // 서버 이력에는 실명 대신 학년-반-번호만(이름은 화면에서 이 기기 이름표로 찾아 붙임)
+        studentLabel: studentLabel(student),
+        nameless: true,
         eventName: EVENT_MAP[eventId]?.name || eventId,
         prevValue: prevValue ?? null,
         newValue: value,
@@ -1684,7 +1765,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setLastSync(Date.now());
         await persistRecords(next);
         appendAuditLog(workspaceCode, {
-          type: "record", ts: Date.now(), by: myDisplayName, studentName: entry.studentName,
+          type: "record", ts: Date.now(), by: myDisplayName, studentLabel: entry.studentLabel || "", nameless: true,
           eventName: entry.eventName, prevValue: entry.newValue, newValue: null,
           studentId: entry.studentId, eventId: entry.eventId, year: entry.year,
           schoolGradeAtMeasure: entry.schoolGradeAtMeasure, prevParts: null,
@@ -2116,15 +2197,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               students={students}
               setStudents={(next) => {
                 // 학생이 추가되거나 삭제된 경우 감사 로그에도 남긴다(누가 언제 몇 명을 바꿨는지).
+                // 서버로 가는 이력이라 이름 대신 인원수·학년-반-번호·id만 남긴다.
                 const prevIds = new Set(students.map(s => s.id));
                 const nextIds = new Set(next.map(s => s.id));
                 const added = next.filter(s => !prevIds.has(s.id));
                 const removed = students.filter(s => !nextIds.has(s.id));
                 if (added.length > 0) {
-                  appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 학생 ${added.map(s => s.name).join(", ")}을(를) 추가함` });
+                  appendAuditLog(workspaceCode, rosterAuditEntry(myDisplayName, "추가", added));
                 }
                 if (removed.length > 0) {
-                  appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 학생 ${removed.map(s => s.name).join(", ")}을(를) 삭제함` });
+                  appendAuditLog(workspaceCode, rosterAuditEntry(myDisplayName, "삭제", removed));
                 }
                 setStudents(next);
                 persistConfig(next, undefined, undefined);
@@ -2717,8 +2799,10 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
   const approved = requests.filter(r => r.status === "approved").sort((a, b) => b.submittedAt - a.submittedAt);
   const denied = requests.filter(r => r.status === "denied").sort((a, b) => b.submittedAt - a.submittedAt);
 
+  const [auditNameMap, setAuditNameMap] = useState({});
   async function loadAuditLogClick() {
     setAuditLoading(true);
+    setAuditNameMap(loadLocalNameMap(workspaceCode));
     const log = await loadAuditLog(workspaceCode);
     setAuditLog(log.slice().reverse().slice(0, 30));
     setAuditLoading(false);
@@ -2902,7 +2986,8 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           <h3>최근 변경 이력</h3>
           <div className="text-dim small-note">
             누가 언제 어떤 학생의 기록을 바꿨는지 최근 항목을 확인할 수 있습니다(최대 300건 보관).
-            성적 관련 문의가 들어왔을 때 참고하세요. BMI·체지방률은 바뀐 값이 서버에 남지 않아서, 값과 되돌리기는
+            성적 관련 문의가 들어왔을 때 참고하세요. 학생 이름은 서버 이력에 남기지 않고 학년-반-번호만 남겨서,
+            이름은 이 기기의 이름표로 찾아 보여줘요(이름표가 없으면 "이름 미확인"). BMI·체지방률은 바뀐 값이 서버에 남지 않아서, 값과 되돌리기는
             그 기록을 입력한 기기에서만 보여요.
           </div>
           <button className="btn btn-ghost" onClick={loadAuditLogClick} disabled={auditLoading}>
@@ -2917,18 +3002,23 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
                   <div className="audit-log-row" key={i}>
                     <span className="audit-log-time">{new Date(a.ts).toLocaleString("ko-KR")}</span>
                     {a.type === "access" ? (
-                      <span>{a.message}</span>
+                      <span>
+                        {a.message}
+                        {Array.isArray(a.studentIds) && a.studentIds.some(id => auditNameMap[id]) && (
+                          <span className="text-dim"> — 이 기기 이름표: {a.studentIds.map(id => auditNameMap[id]).filter(Boolean).slice(0, 30).join(", ")}</span>
+                        )}
+                      </span>
                     ) : a.healthLocal && !("newValue" in a) ? (
                       <div className="audit-log-body">
                         <span>
-                          <b>{a.by}</b>님이 <b>{a.studentName}</b>의 {a.eventName} 기록을 {a.cleared ? "삭제" : "입력·변경"}
+                          <b>{a.by}</b>님이 <b>{auditStudentText(a, auditNameMap)}</b>의 {a.eventName} 기록을 {a.cleared ? "삭제" : "입력·변경"}
                           <span className="text-dim"> (건강 정보라 값은 입력한 기기에만 있어요)</span>
                         </span>
                       </div>
                     ) : (
                       <div className="audit-log-body">
                         <span>
-                          <b>{a.by}</b>님이 <b>{a.studentName}</b>의 {a.eventName} 기록을{" "}
+                          <b>{a.by}</b>님이 <b>{auditStudentText(a, auditNameMap)}</b>의 {a.eventName} 기록을{" "}
                           {a.prevValue === null || a.prevValue === undefined ? "새로" : a.prevValue + " →"}{" "}
                           {a.newValue === null ? "삭제" : a.newValue + "로 변경"}
                         </span>
