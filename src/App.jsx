@@ -9,7 +9,12 @@ import {
   BookOpen, PlayCircle, LogOut
 } from "lucide-react";
 import * as XLSX from "xlsx";
-import { storage, PRACTICE_CODE, clearPracticeStore } from "./storage.js";
+import {
+  storage, PRACTICE_CODE, clearPracticeStore,
+  currentUid, probeSchool, readMyMember, createSchool, founderLogin, requestAccessEntry,
+  verifyViewer, changePasswords, listMembers, updateMember, deleteMember, transferFounderRole,
+  deleteSchoolAll, isValidCode,
+} from "./storage.js";
 import {
   PRACTICE_SCHOOL_NAME, PRACTICE_VIEWER_PASSWORD, PRACTICE_FOUNDER_PASSWORD,
   makePracticeStudents, makePracticeRecords, makePracticeAccessList,
@@ -53,7 +58,9 @@ function configKey(code) { return "paps:config:" + code; }
 function recordsKey(code) { return "paps:records:" + code; }
 
 function sanitizeWorkspaceCode(raw) {
-  return String(raw || "").trim().replace(/[\s/\\'"]+/g, "-").slice(0, 40);
+  const code = String(raw || "").trim().replace(/[\s/\\'"]+/g, "-").slice(0, 40);
+  // Firestore 문서 이름으로 쓸 수 없는 코드("." ".." "__이름__")는 받지 않는다.
+  return isValidCode(code) ? code : "";
 }
 
 /* ============================== 유틸 함수 ============================== */
@@ -348,12 +355,19 @@ function buildReferenceBands() {
 }
 const REFERENCE_BANDS = buildReferenceBands();
 
-function buildDefaultConfig(schoolLevel, viewerPassword, founderPassword) {
+// 실제 학교 코드의 설정에는 비밀번호를 넣지 않는다(비밀번호는 해시로만 따로 저장 — storage.js 참고).
+// 연습모드는 서버로 가지 않으므로, 화면 잠금 체험용 연습 비밀번호를 설정에 함께 넣는다.
+function buildDefaultConfig(schoolLevel, practicePasswords) {
   const lvl = schoolLevel || "middle";
+  const settings = { schoolName: "", schoolLevel: lvl, currentYear: thisYear(), skippedEvents: [], theme: "default" };
+  if (practicePasswords) {
+    settings.viewerPassword = practicePasswords.viewer || "";
+    settings.founderPassword = practicePasswords.founder || "";
+  }
   return {
     students: [],
     criteria: buildDefaultCriteria(lvl),
-    settings: { schoolName: "", schoolLevel: lvl, currentYear: thisYear(), skippedEvents: [], theme: "default", viewerPassword: viewerPassword || "", founderPassword: founderPassword || "" },
+    settings,
     createdAt: Date.now(),
   };
 }
@@ -479,6 +493,12 @@ async function saveConfigRemote(code, obj) {
       // 서버(Firestore)로 나가는 값에는 이름 필드 자체를 아예 넣지 않는다.
       const anonStudents = obj.students.map(({ id, grade, classNum, number, gender }) => ({ id, grade, classNum, number, gender }));
       payload = { ...obj, students: anonStudents };
+    }
+    // 실제 학교 코드에서는 설정에 비밀번호가 남아 있더라도(예전 백업 파일을 불러온 경우 등)
+    // 서버로 보내지 않는다. 비밀번호는 해시로만 따로 저장된다.
+    if (code !== PRACTICE_CODE && payload && payload.settings) {
+      const { viewerPassword, founderPassword, ...rest } = payload.settings;
+      payload = { ...payload, settings: rest };
     }
     await storage.set(configKey(code), JSON.stringify(payload), true);
     return true;
@@ -622,13 +642,26 @@ async function clearSavedWorkspaceCode() {
 }
 
 // ---- 접근 요청(열람 신청) 관련 저장소 ----
-// 열람 신청자는 관리자에게 안내받은 "학교 코드"와 "열람 비밀번호"를 직접
-// 입력해야 하므로, 별도의 숨겨진 포인터 없이 입력받은 코드로 바로 해당
-// 워크스페이스의 설정(비밀번호)을 확인한다.
+// 실제 학교 코드: 구성원 목록은 Firestore의 schools/{코드}/members/{기기 uid}에 있고,
+// 비밀번호 확인·권한 구분은 보안 규칙이 직접 한다(storage.js 참고). 화면에서는 예전과 같은
+// { requests: [{ id, name, type, status, submittedAt }] } 모양으로 바꿔서 쓴다(개설자 항목 제외).
+// 연습모드: 예전처럼 이 기기의 localStorage에 목록과 기기 역할을 둔다.
 function accessKey(code) { return "paps:access:" + code; }
 function deviceKey(code) { return "paps:device:" + code; }
 
 async function loadAccessList(code) {
+  if (code !== PRACTICE_CODE) {
+    try {
+      const members = await listMembers(code);
+      return {
+        requests: members
+          .filter(m => m.type !== "founder")
+          .map(m => ({ id: m.id, name: m.name || "", type: m.type, status: m.status, submittedAt: m.submittedAt || 0 })),
+      };
+    } catch (e) {
+      return { requests: [] };
+    }
+  }
   try {
     const r = await storage.get(accessKey(code), true);
     return r ? JSON.parse(r.value) : { requests: [] };
@@ -644,8 +677,7 @@ async function saveAccessList(code, list) {
     return false;
   }
 }
-// 기기(계정)별 접근 역할은 "개인" 저장소에 저장한다 — 본인 계정에만 연결되어
-// 다른 사람의 승인 상태에 영향을 주지 않는다.
+// 기기별 접근 역할(연습모드 전용, 그리고 예전 버전이 남긴 값 정리용)은 "개인" 저장소에 저장한다.
 async function loadDeviceRole(code) {
   try {
     const r = await storage.get(deviceKey(code), false);
@@ -679,7 +711,7 @@ async function seedPracticeWorkspace() {
   clearPracticeStore();
   try { window.localStorage.removeItem(nameMapKey(PRACTICE_CODE)); } catch (e) { /* 없어도 무방 */ }
   const students = makePracticeStudents();
-  const cfg = buildDefaultConfig("middle", PRACTICE_VIEWER_PASSWORD, PRACTICE_FOUNDER_PASSWORD);
+  const cfg = buildDefaultConfig("middle", { viewer: PRACTICE_VIEWER_PASSWORD, founder: PRACTICE_FOUNDER_PASSWORD });
   cfg.students = students;
   cfg.settings.schoolName = PRACTICE_SCHOOL_NAME;
   cfg.createdAt = Date.now();
@@ -784,6 +816,13 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const [idleLocked, setIdleLocked] = useState(false);
   const [idleLockError, setIdleLockError] = useState("");
   const lastActivityRef = useRef(Date.now());
+  // 접근 신청 비밀번호가 정해져 있는지(=화면 잠금을 쓸 수 있는지). 실제 학교 코드는 비밀번호를
+  // 화면이 알 수 없으므로 서버의 표시(schools/{코드}/meta/info의 viewerOn)를 따른다.
+  const [viewerOn, setViewerOn] = useState(false);
+  const lockEnabled = isPractice ? !!settings.viewerPassword : viewerOn;
+  // 방금 "새 코드 만들기"로 만든 경우에만 코드·비밀번호 메모 창을 띄운다(비밀번호는 이때만 화면이 안다).
+  const justCreatedRef = useRef(false);
+  const [createdPasswords, setCreatedPasswords] = useState({ viewer: "", founder: "" });
 
   const prevTopRef = useRef({});
   const configVersionRef = useRef(0);
@@ -797,7 +836,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   // 빔프로젝터에 띄우는 순간부터 자동으로 잠긴다(별도 켜기/끄기 설정 없음). 나가려면 접근 신청
   // 비밀번호를 입력해야 한다. 비밀번호가 아예 설정되어 있지 않다면 잠글 방법이 없으니 그냥 나간다.
   function requestExitPresentation() {
-    if (settings.viewerPassword && !presentationUnlocked) {
+    if (lockEnabled && !presentationUnlocked) {
       setLockPromptError("");
       setLockPromptOpen(true);
       return;
@@ -805,14 +844,26 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     setPresentation(false);
   }
 
-  function handleUnlockAttempt(pw) {
-    if (pw && settings.viewerPassword && pw === settings.viewerPassword) {
+  // 잠금 풀기 비밀번호 확인. 실제 학교 코드는 서버 보안 규칙이 해시로 확인한다(틀리면 5초 뒤에 다시).
+  async function checkLockPassword(pw) {
+    if (!pw) return false;
+    if (isPractice) return !!settings.viewerPassword && pw === settings.viewerPassword;
+    try {
+      return await verifyViewer(workspaceCode, pw);
+    } catch (e) {
+      return false;
+    }
+  }
+  const LOCK_PW_ERROR = "비밀번호가 올바르지 않습니다. 연달아 시도했다면 5초 뒤에 다시 입력해 주세요.";
+
+  async function handleUnlockAttempt(pw) {
+    if (await checkLockPassword(pw)) {
       setPresentationUnlocked(true);
       setLockPromptOpen(false);
       setLockPromptError("");
       setPresentation(false);
     } else {
-      setLockPromptError("비밀번호가 올바르지 않습니다.");
+      setLockPromptError(LOCK_PW_ERROR);
     }
   }
 
@@ -827,7 +878,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     if (presentation) return;
     if (isPractice) return; // 연습모드에는 실제 학생 정보가 없으니 자동 잠금으로 흐름을 끊지 않는다
     if (role !== "admin" && role !== "viewer") return;
-    if (!settings.viewerPassword) return;
+    if (!lockEnabled) return;
 
     lastActivityRef.current = Date.now();
     const markActive = () => { lastActivityRef.current = Date.now(); };
@@ -845,16 +896,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       activityEvents.forEach(ev => window.removeEventListener(ev, markActive));
       clearInterval(timer);
     };
-  }, [role, presentation, settings.viewerPassword, workspaceCode, isPractice]);
+  }, [role, presentation, lockEnabled, workspaceCode, isPractice]);
 
-  function handleIdleUnlockAttempt(pw) {
-    if (pw && settings.viewerPassword && pw === settings.viewerPassword) {
+  async function handleIdleUnlockAttempt(pw) {
+    if (await checkLockPassword(pw)) {
       setIdleLocked(false);
       setIdleLockError("");
       lastActivityRef.current = Date.now();
       storage.delete(idleLockFlagKey(workspaceCode), false).catch(() => {});
     } else {
-      setIdleLockError("비밀번호가 올바르지 않습니다.");
+      setIdleLockError(LOCK_PW_ERROR);
     }
   }
 
@@ -952,130 +1003,159 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   }
 
   /* ---------- 접근 권한(역할) 확인 ---------- */
+  // 실제 학교 코드: 이 기기의 익명 로그인 고유번호(uid)로 된 구성원 문서(members/{uid})를 읽어
+  // 역할을 정한다. 개설자 비밀번호 확인·새 코드 만들기·예전 방식 코드 옮기기도 여기서 한다.
+  // 비밀번호가 맞는지는 서버 보안 규칙이 해시로 확인한다(storage.js·firestore.rules 참고).
+  function applyMember(entry) {
+    if (entry.type === "founder" && entry.status === "approved") {
+      setIsFounder(true);
+      setMyDisplayName("개설자");
+      setRole("admin");
+      return true;
+    }
+    if (entry.status === "approved") {
+      setIsFounder(false);
+      setMyDisplayName(entry.name || "선생님");
+      setRole(entry.type === "editor" ? "admin" : "viewer");
+      return true;
+    }
+    if (entry.status === "pending") {
+      setRole("pending");
+      setMyRequest({ id: entry.id, name: entry.name, type: entry.type });
+      return false;
+    }
+    setRole("blocked");
+    setBlockReason("denied");
+    return false;
+  }
+
   useEffect(() => {
     if (!workspaceCode) return;
     let cancelled = false;
     setRoleChecking(true);
+    const finish = () => { if (!cancelled) setRoleChecking(false); };
+    const block = async (reason, forgetCode = true) => {
+      if (forgetCode) await clearSavedWorkspaceCode();
+      if (cancelled) return;
+      setRole("blocked");
+      setBlockReason(reason);
+      finish();
+    };
     (async () => {
-      const device = await loadDeviceRole(workspaceCode);
-      if (cancelled) return;
-      if (device) setMyDeviceId(device.id);
-
-      // 이 코드가 실제로 아직 존재하는지 먼저 확인한다. 마감으로 방금 삭제된 코드처럼, 이
-      // 기기에 예전 역할이 캐시되어 있거나(예전에 개설자·조회자·수정권한자였던 기기) 이
-      // 기기가 예전에 쓰던 코드를 자동으로 다시 불러온 경우, 설정(cfg)이 이미 사라졌다면
-      // 그 캐시된 역할을 그대로 믿어서는 안 된다. 이걸 확인하지 않으면, 마감으로 지워진
-      // 코드를 다시 열었을 때(특히 모바일에서 앱을 나갔다가 다시 열어 이 기기가 예전 코드를
-      // 자동으로 재접속 시도할 때) 아무 확인 절차 없이 조용히 새 빈 코드가 다시 만들어지거나
-      // (개설자였던 기기) 예전 권한이 유령처럼 되살아나 버리는(조회자·수정권한자였던 기기)
-      // 문제가 있었다.
-      const cfg = await loadConfig(workspaceCode);
-      if (cancelled) return;
-
-      if (!cfg) {
-        if (!device && pendingIntentRef.current === "create") {
-          // "새 코드 만들기"로 직접 제출한 경우에만, 지금 이 사람을 새 개설자로 만든다.
-          const newId = uid("dev");
-          await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
-          await saveWorkspaceCodeRemote(workspaceCode);
-          setMyDeviceId(newId);
-          setIsFounder(true);
-          setMyDisplayName("개설자");
-          setRole("admin");
-          setRoleChecking(false);
-          return;
-        }
-        // 그 외의 경우(존재하지 않는 코드로 "코드로 로그인"을 시도했거나, 이 기기가 예전에
-        // 쓰던 코드를 자동으로 다시 불러왔거나, 이 기기가 예전에 이 코드로 뭔가 권한을
-        // 가졌었지만 지금은 코드 자체가 없는 경우)에는 조용히 새로 만들지 않는다. 이 기기에
-        // 남은 캐시(역할·마지막으로 쓰던 코드로 기억해 둔 값)를 정리해, 다음에 또 자동으로
-        // 이 코드를 불러오는 일이 없게 한다.
-        if (device) await clearDeviceRole(workspaceCode);
-        await clearSavedWorkspaceCode();
+      // 연습모드: 서버를 쓰지 않고 이 기기에 깔아 둔 연습 데이터로 개설자처럼 들어간다.
+      if (workspaceCode === PRACTICE_CODE) {
+        const list = await loadAccessList(PRACTICE_CODE);
         if (cancelled) return;
-        setRole("blocked");
-        setBlockReason("no-such-code");
-        setRoleChecking(false);
-        return;
-      }
-
-      if (device && device.role === "admin") {
-        // 이 기기가 "최초 개설자"인지 "승인받은 수정 권한자"인지 구분한다. 접근권한 목록에
-        // 내 항목이 있으면(=신청해서 승인받은 사람) 개설자가 아니라 제한된 관리자다.
-        const list = await loadAccessList(workspaceCode);
-        const mine = list.requests.find(r => r.id === device.id);
-        setIsFounder(!mine);
-        setMyDisplayName(mine ? mine.name : "개설자");
-        setAccessList(list);
-        await saveWorkspaceCodeRemote(workspaceCode);
-        setRole("admin");
-        setRoleChecking(false);
-        return;
-      }
-
-      if (device && (device.role === "viewer" || device.role === "pending")) {
-        const list = await loadAccessList(workspaceCode);
-        const mine = list.requests.find(r => r.id === device.id);
-        if (mine && mine.status === "approved") {
-          const grantedRole = mine.type === "editor" ? "admin" : "viewer";
-          await saveDeviceRole(workspaceCode, { id: device.id, role: grantedRole });
-          await saveWorkspaceCodeRemote(workspaceCode);
-          setIsFounder(false);
-          setMyDisplayName(mine.name);
-          setRole(grantedRole);
-          setAccessList(list);
-        } else if (mine && mine.status === "denied") {
-          // 승인 대기·거절 안내 화면은 "접속된 상태"가 아니므로, 여기서 나갔다가 다시
-          // 들어오면 곧바로 이 화면으로 되돌아가지 않고 처음 화면부터 시작하게 한다.
-          await clearSavedWorkspaceCode();
-          setRole("blocked");
-          setBlockReason("denied");
-        } else if (mine && mine.status === "pending") {
-          setRole("pending");
-          setMyRequest({ id: mine.id, name: mine.name, type: mine.type });
-        } else {
-          // 요청 기록을 찾을 수 없음(관리자가 삭제 등) — 취소된 것으로 처리
-          await clearDeviceRole(workspaceCode);
-          await clearSavedWorkspaceCode();
-          setRole("blocked");
-          setBlockReason("revoked");
-        }
-        setRoleChecking(false);
-        return;
-      }
-
-      // 이 기기(계정)에 저장된 역할은 없지만, 코드 자체는 이미 존재하는 경우(위에서 cfg
-      // 확인으로 "존재하지 않는 코드"는 이미 걸러졌다). 단, 이번에 함께 입력한 값이
-      // "개설자 전용 비밀번호"와 정확히 일치하면(개설자 본인이 다른 기기로 넘어온 경우),
-      // 별도 승인 절차 없이 곧바로 개설자로 인정한다. 그 외에는 "접근 신청" 절차를 거쳐야 한다.
-      const founderPw = cfg.settings?.founderPassword;
-      if (founderPw && pendingFounderPasswordRef.current && pendingFounderPasswordRef.current === founderPw) {
-        const newId = uid("dev");
-        await saveDeviceRole(workspaceCode, { id: newId, role: "admin" });
-        await saveWorkspaceCodeRemote(workspaceCode);
-        setMyDeviceId(newId);
+        setMyDeviceId("dev_practice");
         setIsFounder(true);
         setMyDisplayName("개설자");
+        setAccessList(list);
+        setViewerOn(false);
         setRole("admin");
-        setRoleChecking(false);
+        finish();
         return;
       }
 
-      // 아직 아무 권한도 없이 "이미 있는 코드"를 만난 경우(접근 신청이 필요한 상태)다.
-      // 실제로 접근 신청을 마치기 전까지는 이 코드를 "마지막으로 쓴 코드"로 남겨두지 않는다.
-      // 그래야 이 안내 화면을 보고 나갔다가 다시 들어와도 곧장 같은 화면으로 되돌아가지 않고
-      // 처음 화면부터 다시 시작한다.
-      await clearSavedWorkspaceCode();
-      setRole("blocked");
-      setBlockReason("need-request");
-      setRoleChecking(false);
+      // 입력받은 비밀번호는 한 번만 쓰고 바로 비운다(다시 확인할 때 같은 값을 또 보내지 않게).
+      const founderPw = pendingFounderPasswordRef.current;
+      const viewerPw = pendingViewerPasswordRef.current;
+      const intent = pendingIntentRef.current;
+      pendingFounderPasswordRef.current = "";
+      pendingViewerPasswordRef.current = "";
+      pendingIntentRef.current = "login";
+
+      let probe;
+      try {
+        await currentUid();
+        probe = await probeSchool(workspaceCode);
+      } catch (e) {
+        console.error("access check failed:", e);
+        await block("network", false);
+        return;
+      }
+      if (cancelled) return;
+      setMyDeviceId(await currentUid());
+      // 예전 버전이 이 기기에 남긴 역할 값(기기 id 방식)은 더 이상 쓰지 않는다.
+      const oldDevice = await loadDeviceRole(workspaceCode);
+      if (oldDevice) await clearDeviceRole(workspaceCode);
+
+      if (probe.state === "none") {
+        // "새 코드 만들기"로 직접 제출한 경우에만, 지금 이 사람을 새 개설자로 만든다. 그 외에는
+        // (없는 코드로 로그인, 이 기기가 예전에 쓰던 코드를 자동으로 다시 불러온 경우 등) 조용히
+        // 새로 만들지 않고, 다음에 또 자동으로 이 코드를 불러오지 않도록 기억해 둔 값을 지운다.
+        if (intent === "create" && founderPw) {
+          let created = false;
+          try { created = await createSchool(workspaceCode, viewerPw, founderPw); } catch (e) { console.error(e); }
+          if (cancelled) return;
+          if (created) {
+            justCreatedRef.current = true;
+            setCreatedPasswords({ viewer: viewerPw, founder: founderPw });
+            setViewerOn(!!viewerPw);
+            await saveWorkspaceCodeRemote(workspaceCode);
+            setIsFounder(true);
+            setMyDisplayName("개설자");
+            setRole("admin");
+            finish();
+            return;
+          }
+          await block("network", false);
+          return;
+        }
+        await block("no-such-code");
+        return;
+      }
+
+      // 이미 있는 코드. 개설자 전용 비밀번호를 함께 입력했다면 먼저 개설자로 확인한다
+      // (개설자 본인이 다른 기기로 넘어온 경우, 또는 예전 방식 코드를 새 방식으로 옮기는 첫 로그인).
+      let me = null;
+      try { me = await readMyMember(workspaceCode); } catch (e) { me = null; }
+      if (cancelled) return;
+      if (founderPw && !(me && me.type === "founder" && me.status === "approved")) {
+        let result;
+        try {
+          result = await founderLogin(workspaceCode, founderPw);
+        } catch (e) {
+          console.error("founder login failed:", e);
+          await block("migrate-failed", false);
+          return;
+        }
+        if (cancelled) return;
+        if (!result.ok) {
+          await block(intent === "create" ? "code-taken" : "bad-founder-password");
+          return;
+        }
+        if (result.migrated) showToast("새 보안 방식으로 옮겼어요. 동료 선생님은 접근 신청을 한 번 다시 해야 해요.", "ok");
+        me = await readMyMember(workspaceCode);
+        probe = await probeSchool(workspaceCode).catch(() => probe); // 옮긴 뒤에는 "ready"
+        if (cancelled) return;
+      }
+
+      if (probe.state === "legacy") {
+        // 아직 새 방식으로 옮기지 않은 예전 코드: 개설자가 개설자 전용 비밀번호로 한 번 로그인해야
+        // 옮겨지고, 그 전에는 아무도 쓸 수 없다(동료 선생님의 접근 신청도 옮긴 뒤에 할 수 있음).
+        await block("legacy-relogin");
+        return;
+      }
+
+      if (!me) {
+        // 아직 아무 권한도 없이 "이미 있는 코드"를 만난 경우(접근 신청이 필요한 상태)다.
+        // 예전 버전에서 이 기기가 쓰던 코드라면 "한 번 다시 들어와 주세요"로 안내한다.
+        await block(oldDevice ? "legacy-relogin" : "need-request");
+        return;
+      }
+      setViewerOn(!!probe.viewerOn);
+      const entered = applyMember(me);
+      if (entered) await saveWorkspaceCodeRemote(workspaceCode);
+      else if (me.status !== "pending") await clearSavedWorkspaceCode();
+      finish();
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceCode]);
 
-  /* ---------- 열람 신청: 학교 코드 + 열람 비밀번호로 즉시 확인 ---------- */
-  // 비밀번호를 무작위로 계속 시도하는 것을 막기 위해, 이 기기에서 같은 학교 코드로 틀린
-  // 비밀번호를 반복 입력하면 잠시 잠긴다(완전한 서버 차단은 아니지만 최소한의 안전장치).
+  /* ---------- 접근 신청: 학교 코드 + 접근 신청 비밀번호 ---------- */
+  // 비밀번호는 서버 보안 규칙이 해시로 확인하고, 틀리면 5초에 한 번만 다시 시도할 수 있다.
+  // 그에 더해 이 기기에서 같은 학교 코드로 틀린 비밀번호를 반복 입력하면 잠시 잠근다.
   async function checkPasswordAttempt(code) {
     const key = "paps:pwattempts:" + code;
     const WINDOW_MS = 10 * 60 * 1000; // 10분
@@ -1100,41 +1180,24 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   async function requestAccess({ name, code, password, wantsEdit }) {
     const sanitizedCode = sanitizeWorkspaceCode(code);
     if (!sanitizedCode) return { ok: false, reason: "bad-code" };
+    if (sanitizedCode === PRACTICE_CODE) return { ok: false, reason: "bad-code" };
     const attempt = await checkPasswordAttempt(sanitizedCode);
     if (attempt.blocked) return { ok: false, reason: "too-many-attempts" };
-    const cfg = await loadConfig(sanitizedCode);
-    if (!cfg) return { ok: false, reason: "bad-code" };
-    const setPassword = cfg.settings?.viewerPassword;
-    if (!setPassword) return { ok: false, reason: "no-password-set" };
-    if (password !== setPassword) {
-      await recordPasswordFailure(attempt.key, attempt.data);
-      return { ok: false, reason: "bad-password" };
+    let result;
+    try {
+      result = await requestAccessEntry(sanitizedCode, password, name, wantsEdit);
+    } catch (e) {
+      console.error("access request failed:", e);
+      return { ok: false, reason: "error" };
+    }
+    if (!result.ok) {
+      if (result.reason === "bad-password") await recordPasswordFailure(attempt.key, attempt.data);
+      return result;
     }
     await clearPasswordAttempts(attempt.key);
-
-    const list = await loadAccessList(sanitizedCode);
-    const trimmedName = name.trim();
-    const type = wantsEdit ? "editor" : "viewer";
-
-    // 이미 같은 이름 + 같은 권한 종류로 승인받은 계정이 있다면(브라우저 데이터가 지워졌거나
-    // 새 기기로 바꾼 경우일 가능성이 높음), 다시 승인을 기다리지 않고 그 기존 승인을 이
-    // 기기로 그대로 이어받는다. 이름과 비밀번호가 둘 다 맞아야 하므로 위험은 낮다.
-    const existing = list.requests.find(r => r.status === "approved" && r.name === trimmedName && r.type === type);
-    if (existing) {
-      await saveDeviceRole(sanitizedCode, { id: existing.id, role: type === "editor" ? "admin" : "viewer" });
-      await saveWorkspaceCodeRemote(sanitizedCode);
-      setWorkspaceCode(sanitizedCode);
-      return { ok: true, reclaimed: true };
-    }
-
-    const id = uid("req");
-    // 조회는 비밀번호 확인만으로 즉시 승인되지만, 데이터 수정 권한은 최초 개설자의
-    // 별도 승인이 있어야 부여된다.
-    const status = wantsEdit ? "pending" : "approved";
-    const entry = { id, name: trimmedName, submittedAt: Date.now(), status, type };
-    await saveAccessList(sanitizedCode, { requests: [...list.requests, entry] });
-    await saveDeviceRole(sanitizedCode, { id, role: wantsEdit ? "pending" : "viewer" });
-    await saveWorkspaceCodeRemote(sanitizedCode);
+    pendingFounderPasswordRef.current = "";
+    pendingIntentRef.current = "login";
+    if (result.entry.status === "approved") await saveWorkspaceCodeRemote(sanitizedCode);
     setWorkspaceCode(sanitizedCode);
     return { ok: true };
   }
@@ -1158,7 +1221,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     const list = await loadAccessList(workspaceCode);
     const target = list.requests.find(r => r.id === id);
     const nextList = { requests: list.requests.map(r => r.id === id ? { ...r, status } : r) };
-    await saveAccessList(workspaceCode, nextList);
+    if (isPractice) {
+      await saveAccessList(workspaceCode, nextList);
+    } else {
+      try {
+        await updateMember(workspaceCode, id, { status, decidedAt: Date.now() });
+      } catch (e) {
+        showToast("처리하지 못했습니다. 다시 시도해 주세요.", "warn");
+        return;
+      }
+    }
     setAccessList(nextList);
     if (target) {
       appendAuditLog(workspaceCode, {
@@ -1180,7 +1252,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     const list = await loadAccessList(workspaceCode);
     const target = list.requests.find(r => r.id === id);
     const nextList = { requests: list.requests.filter(r => r.id !== id) };
-    await saveAccessList(workspaceCode, nextList);
+    if (isPractice) {
+      await saveAccessList(workspaceCode, nextList);
+    } else {
+      try {
+        await deleteMember(workspaceCode, id);
+      } catch (e) {
+        showToast("삭제하지 못했습니다. 다시 시도해 주세요.", "warn");
+        return;
+      }
+    }
     setAccessList(nextList);
     if (target) {
       appendAuditLog(workspaceCode, {
@@ -1200,16 +1281,57 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     const list = await loadAccessList(workspaceCode);
     const target = list.requests.find(r => r.id === targetRequestId);
     if (!target || target.status !== "approved") return { ok: false };
-    // 넘겨받을 사람의 신청 항목은 제거한다(항목이 없어지면 다음 확인 때 그 사람이 개설자가 된다).
+    // 넘겨받을 사람은 개설자가 되어 목록에서 빠지고, 나 자신은 평범한 승인 편집자가 된다.
     const withoutTarget = list.requests.filter(r => r.id !== targetRequestId);
-    // 나 자신은 이제 평범한 승인 편집자로 등록해 둔다.
     const meAsEditor = { id: myDeviceId, name: myDisplayName === "개설자" ? "이전 개설자" : myDisplayName, submittedAt: Date.now(), status: "approved", type: "editor" };
     const nextList = { requests: [...withoutTarget, meAsEditor] };
-    await saveAccessList(workspaceCode, nextList);
+    if (isPractice) {
+      await saveAccessList(workspaceCode, nextList);
+    } else {
+      try {
+        await transferFounderRole(workspaceCode, targetRequestId, meAsEditor.name);
+      } catch (e) {
+        return { ok: false };
+      }
+      appendAuditLog(workspaceCode, {
+        type: "access",
+        ts: Date.now(),
+        by: myDisplayName,
+        message: `${myDisplayName}님이 ${target.name}님에게 개설자 권한을 넘김`,
+      });
+    }
     setAccessList(nextList);
     setIsFounder(false);
     setMyDisplayName(meAsEditor.name);
     return { ok: true, newFounderName: target.name };
+  }
+
+  // 개설자: 비밀번호 바꾸기. 실제 학교 코드는 해시만 서버에 저장하고(원문은 저장·표시하지 않음),
+  // 연습모드는 이 기기에 저장된 연습 설정을 바꾼다. 빈 칸은 그대로 둔다.
+  async function handleChangePasswords({ viewerPassword, founderPassword, viewerOff }) {
+    const v = String(viewerPassword || "").trim();
+    const f = String(founderPassword || "").trim();
+    if (!viewerOff && !v && !f) return { ok: false, reason: "empty" };
+    if (isPractice) {
+      const next = { ...settings };
+      if (viewerOff) next.viewerPassword = "";
+      else if (v) next.viewerPassword = v;
+      if (f) next.founderPassword = f;
+      setSettings(next);
+      persistConfig(undefined, undefined, next);
+      return { ok: true };
+    }
+    try {
+      const r = await changePasswords(workspaceCode, { viewerPassword: v, founderPassword: f, viewerOff });
+      if (!r.changed) return { ok: false, reason: "empty" };
+      setViewerOn(!!r.viewerOn);
+      if (!r.viewerOn) storage.delete(idleLockFlagKey(workspaceCode), false).catch(() => {});
+      const what = [f ? "개설자 전용 비밀번호" : null, viewerOff ? "접근 신청(끔)" : (v ? "접근 신청 비밀번호" : null)].filter(Boolean).join("·");
+      appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 ${what}을(를) 바꿈` });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: "error" };
+    }
   }
 
   /* ---------- 초기 로드 (권한이 확인된 뒤) ---------- */
@@ -1222,20 +1344,23 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       // either way the correct move is to fall back to empty/default data.
       const cfg = await loadConfig(workspaceCode);
       const recs = await loadRecordsRemote(workspaceCode);
-      const finalCfg = cfg || buildDefaultConfig(pendingSchoolLevelRef.current, pendingViewerPasswordRef.current, pendingFounderPasswordRef.current);
+      const finalCfg = cfg || (isPractice
+        ? buildDefaultConfig(pendingSchoolLevelRef.current, { viewer: PRACTICE_VIEWER_PASSWORD, founder: PRACTICE_FOUNDER_PASSWORD })
+        : buildDefaultConfig(pendingSchoolLevelRef.current));
       const backfilledCreatedAt = !finalCfg.createdAt;
       if (backfilledCreatedAt) finalCfg.createdAt = Date.now(); // 이전 버전에 만들어진 코드는 지금부터 1년을 새로 센다
 
       // 1년 넘게 방치된 코드는 마감을 깜빡 잊은 것으로 보고 자동으로 마감(전체 삭제)
       // 처리한다. 기록이 쓸데없이 계속 쌓여 프로그램이 느려지는 것을 막기 위한 안전망이다.
       const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
-      if (role === "admin" && cfg && Date.now() - finalCfg.createdAt > ONE_YEAR_MS) {
-        await storage.delete(recordsKey(workspaceCode), true).catch(() => {});
-        await storage.delete(configKey(workspaceCode), true).catch(() => {});
-        await storage.delete(accessKey(workspaceCode), true).catch(() => {});
-        await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
-        await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
-        await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+      // 지우기는 서버 규칙상 개설자만 할 수 있으므로, 개설자가 열었을 때 처리한다.
+      if (role === "admin" && isFounder && cfg && Date.now() - finalCfg.createdAt > ONE_YEAR_MS) {
+        if (isPractice) {
+          clearPracticeStore();
+        } else {
+          await deleteSchoolAll(workspaceCode).catch(() => {});
+          await clearSavedWorkspaceCode().catch(() => {});
+        }
         try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
         showToast("이 코드가 개설된 지 1년이 지나 자동으로 마감(전체 삭제)되었습니다.", "warn");
         setWorkspaceCode(null);
@@ -1252,7 +1377,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 
       if ((!cfg || migrated || backfilledCreatedAt) && role === "admin") await saveConfigRemote(workspaceCode, finalCfg);
       if (migrated && role === "admin") await saveRecordsRemote(workspaceCode, migratedRecords);
-      if (!cfg && role === "admin") setJustCreatedNotice(true);
+      if (!cfg && role === "admin" && justCreatedRef.current) setJustCreatedNotice(true);
+      justCreatedRef.current = false;
 
       setStudents(finalCfg.students || []);
       setCriteria(finalCfg.criteria || buildDefaultCriteria(finalCfg.settings?.schoolLevel));
@@ -1263,10 +1389,11 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       // 표시를 확인해 복원한다. 빔프로젝터 새 창(forcePresentation)은 별도의 잠금 방식을
       // 쓰므로 대상에서 제외하고, 그 사이 접근 신청 비밀번호가 사라졌다면(=풀 방법이
       // 없어졌다면) 오래된 표시를 지워 영영 잠긴 채로 남지 않게 한다.
-      if (finalCfg.settings?.viewerPassword && !forcePresentation) {
+      const canLock = isPractice ? !!finalCfg.settings?.viewerPassword : viewerOn;
+      if (canLock && !forcePresentation) {
         const idleFlag = await storage.get(idleLockFlagKey(workspaceCode), false).catch(() => null);
         if (idleFlag) setIdleLocked(true);
-      } else if (!finalCfg.settings?.viewerPassword) {
+      } else if (!canLock) {
         await storage.delete(idleLockFlagKey(workspaceCode), false).catch(() => {});
       }
       // 연도 선택은 저장된 값이 아니라 "지금 실제 연도"로 항상 자동 설정한다. 저장된 값을
@@ -1321,35 +1448,24 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           });
         }
       }
-      if (role === "admin") {
-        refreshAccessList();
-        // 이 기기가 "승인받아 수정 권한을 받은 동료 교사"(최초 개설자 본인이 아님)라면,
-        // 그 승인이 취소되지는 않았는지 주기적으로 확인한다. 또한 개설자 승계가 일어나서
-        // 내 항목이 목록에서 사라졌다면(=내가 새 개설자가 됐다면) isFounder도 갱신한다.
-        const device = await loadDeviceRole(workspaceCode);
-        if (device) {
-          const list = await loadAccessList(workspaceCode);
-          const mine = list.requests.find(r => r.id === device.id);
-          if (mine && mine.status !== "approved") {
-            await clearDeviceRole(workspaceCode);
-            setRole("blocked");
-            setBlockReason("revoked");
-          } else {
-            setIsFounder(!mine);
-          }
+      if (role === "admin") refreshAccessList();
+      if (!isPractice) {
+        // 내 구성원 문서를 다시 읽어, 개설자가 권한을 취소하지 않았는지·개설자 승계로 역할이
+        // 바뀌지 않았는지 확인한다. 접근 신청 비밀번호가 켜져 있는지(화면 잠금)도 함께 맞춘다.
+        const me = await readMyMember(workspaceCode).catch(() => undefined);
+        if (me === null || (me && me.status !== "approved")) {
+          await clearSavedWorkspaceCode();
+          setRole("blocked");
+          setBlockReason("revoked");
+        } else if (me) {
+          const nextRole = me.type === "viewer" ? "viewer" : "admin";
+          if (nextRole !== role) setRole(nextRole);
+          setIsFounder(me.type === "founder");
+          if (me.type === "founder") setMyDisplayName("개설자");
+          else if (me.name) setMyDisplayName(me.name);
         }
-      } else if (role === "viewer") {
-        // 조회 권한 보유자는 관리자가 승인을 취소했는지 주기적으로 확인한다.
-        const device = await loadDeviceRole(workspaceCode);
-        if (device) {
-          const list = await loadAccessList(workspaceCode);
-          const mine = list.requests.find(r => r.id === device.id);
-          if (mine && mine.status !== "approved") {
-            await clearDeviceRole(workspaceCode);
-            setRole("blocked");
-            setBlockReason("revoked");
-          }
-        }
+        const p = await probeSchool(workspaceCode).catch(() => null);
+        if (p && p.state === "ready") setViewerOn(!!p.viewerOn);
       }
     }, 10000);
     return () => clearInterval(interval);
@@ -1359,15 +1475,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   useEffect(() => {
     if (role !== "pending" || !workspaceCode) return;
     const interval = setInterval(async () => {
-      const list = await loadAccessList(workspaceCode);
-      const mine = list.requests.find(r => r.id === myRequest?.id);
+      // 내 구성원 문서를 다시 읽어 개설자가 승인·거절했는지 확인한다.
+      const mine = await readMyMember(workspaceCode).catch(() => undefined);
       if (mine && mine.status === "approved") {
         // 승인된 것이 "수정 권한(editor)" 요청이었다면 관리자로, 아니면 조회 전용으로 부여한다.
-        // (이 부분에서 type을 확인하지 않아 수정 권한 승인자가 조회 전용으로 잘못 들어가던 버그를 수정함)
-        const grantedRole = mine.type === "editor" ? "admin" : "viewer";
-        await saveDeviceRole(workspaceCode, { id: mine.id, role: grantedRole });
+        const grantedRole = mine.type === "viewer" ? "viewer" : "admin";
+        setIsFounder(mine.type === "founder");
+        setMyDisplayName(mine.type === "founder" ? "개설자" : (mine.name || "선생님"));
+        await saveWorkspaceCodeRemote(workspaceCode);
         setRole(grantedRole);
-      } else if (mine && mine.status === "denied") {
+      } else if (mine === null || (mine && mine.status === "denied")) {
         setRole("blocked");
         setBlockReason("denied");
       }
@@ -1538,13 +1655,18 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   // 지운다. 마감 후에는 이 코드가 다시 "아무도 만든 적 없는 코드"가 되어, 화면은 첫
   // 화면(코드 설정)으로 돌아간다. 되돌릴 수 없다.
   const performSemesterCloseout = useCallback(async () => {
-    if (role !== "admin") return;
-    await storage.delete(recordsKey(workspaceCode), true).catch(() => {});
-    await storage.delete(configKey(workspaceCode), true).catch(() => {});
-    await storage.delete(accessKey(workspaceCode), true).catch(() => {});
-    await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
-    await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
-    await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+    if (role !== "admin" || !isFounder) return;
+    if (workspaceCode === PRACTICE_CODE) {
+      await storage.delete(recordsKey(workspaceCode), true).catch(() => {});
+      await storage.delete(configKey(workspaceCode), true).catch(() => {});
+      await storage.delete(accessKey(workspaceCode), true).catch(() => {});
+      await storage.delete(auditLogKey(workspaceCode), true).catch(() => {});
+      await storage.delete(backupLogKey(workspaceCode), true).catch(() => {});
+      await storage.delete(deviceKey(workspaceCode), false).catch(() => {});
+    } else {
+      // 기록·명단·설정·이력·비밀번호 해시·구성원 목록을 서버에서 모두 지운다(개설자만 가능).
+      await deleteSchoolAll(workspaceCode).catch(() => {});
+    }
     // 이 기기가 "마지막으로 쓰던 코드"로 기억해 둔 값도 지운다. 그렇지 않으면 마감 직후
     // 화면은 첫 화면으로 돌아가더라도, 앱을 나갔다가 다시 열 때(특히 모바일) 이 기기가
     // 방금 지운 코드를 자동으로 다시 불러와 재접속을 시도하는 문제가 있었다.
@@ -1563,7 +1685,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     setWorkspaceCode(null);
     setRole(null);
     setLoading(true);
-  }, [role, workspaceCode, showToast]);
+  }, [role, isFounder, workspaceCode, showToast]);
 
   // "계속 쓸게요" — 자동 마감 경고가 뜬 코드를 아직 쓰고 있다면, 개설 시각을 지금으로
   // 다시 잡아 1년을 새로 센다(수동 마감 없이 그대로 사용을 이어간다).
@@ -1790,9 +1912,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         {justCreatedNotice && (
           <CodeCreatedNoticeModal
             workspaceCode={workspaceCode}
-            viewerPassword={settings.viewerPassword}
-            founderPassword={settings.founderPassword}
-            onClose={() => setJustCreatedNotice(false)}
+            viewerPassword={createdPasswords.viewer}
+            founderPassword={createdPasswords.founder}
+            onClose={() => { setJustCreatedNotice(false); setCreatedPasswords({ viewer: "", founder: "" }); }}
           />
         )}
         {lockPromptOpen && (
@@ -1814,7 +1936,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             <PlayCircle size={16} />
             <span>
               <b>연습모드</b> · 가짜 학생으로 체험 중입니다. 여기서 한 일은 이 기기에만 저장되고 실제 학교
-              데이터와 섞이지 않아요. 연습용 비밀번호: 접근 신청 <b>{PRACTICE_VIEWER_PASSWORD}</b> · 개설자 <b>{PRACTICE_FOUNDER_PASSWORD}</b>
+              데이터와 섞이지 않아요. 연습용 비밀번호: 접근 신청 <b>{settings.viewerPassword || "없음"}</b> · 개설자 <b>{settings.founderPassword || PRACTICE_FOUNDER_PASSWORD}</b>
             </span>
             <span className="practice-banner-actions">
               <button className="btn btn-ghost small" onClick={resetPractice}><RotateCcw size={13} /> 처음 상태로</button>
@@ -1960,8 +2082,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               onDeleteEntry={deleteRequestEntry}
               onTransferFounder={transferFounder}
               onUndoRecord={undoRecordChange}
-              settings={settings}
-              setSettings={(next) => { setSettings(next); persistConfig(undefined, undefined, next); }}
+              lockEnabled={lockEnabled}
+              isPractice={isPractice}
+              onChangePasswords={handleChangePasswords}
               onOpenShare={() => setShareModalOpen(true)}
               isFounder={isFounder}
               workspaceCode={workspaceCode}
@@ -2064,8 +2187,9 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
     setSubmitting(false);
     if (!result.ok) {
       if (result.reason === "bad-code") setFormError("존재하지 않는 학교 코드입니다. 개설자 선생님께 다시 확인해 주세요.");
-      else if (result.reason === "no-password-set") setFormError("이 학교는 아직 접근 신청 비밀번호가 설정되어 있지 않습니다. 개설자 선생님께 문의해 주세요.");
-      else if (result.reason === "bad-password") setFormError("접근 신청 비밀번호가 올바르지 않습니다.");
+      else if (result.reason === "no-password-set") setFormError("이 학교는 접근 신청이 꺼져 있어요(접근 신청 비밀번호 없음). 개설자 선생님께 문의해 주세요.");
+      else if (result.reason === "legacy") setFormError("이 학교 코드는 아직 새 보안 방식으로 옮겨지지 않았어요. 개설자 선생님이 새 버전에서 개설자 전용 비밀번호로 한 번 로그인한 뒤에 신청할 수 있어요.");
+      else if (result.reason === "bad-password") setFormError("접근 신청 비밀번호가 올바르지 않아요. 연달아 시도했다면 5초 뒤에 다시 해 주세요.");
       else if (result.reason === "too-many-attempts") setFormError("비밀번호를 너무 여러 번 틀렸습니다. 10분 뒤 다시 시도해 주세요.");
       else setFormError("신청을 처리하지 못했습니다. 다시 시도해 주세요.");
     }
@@ -2166,7 +2290,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
                   ))}
                 </div>
               </div>
-              <button className="btn btn-primary big-btn" disabled={!value.trim()} onClick={submitCode}>
+              <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
                 만들기
               </button>
 
@@ -2185,9 +2309,9 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
                   <div className="text-dim small-note gate-pw-hint">
                     <b>개설자 전용 비밀번호:</b> 선생님(개설자) 본인만 알아야 하는 비밀번호입니다.
                     나중에 다른 기기(휴대폰↔컴퓨터 등)에서 같은 코드와 이 비밀번호를 "코드로 로그인"
-                    화면에 입력하면, 승인 절차 없이 곧바로 개설자로 다시 들어올 수 있어요. 비워두면
-                    다른 기기에서 개설자로 로그인할 수 없으니 꼭 정해주세요. 아래 "접근 신청
-                    비밀번호"와는 다른 값으로 정하고, 동료 교사에게는 절대 알려주지 마세요.
+                    화면에 입력하면, 승인 절차 없이 곧바로 개설자로 다시 들어올 수 있어요. 꼭 정해야
+                    코드를 만들 수 있어요. 아래 "접근 신청 비밀번호"와는 다른 값으로 정하고, 동료
+                    교사에게는 절대 알려주지 마세요.
                   </div>
                   <div className="text-dim small-note gate-pw-hint">
                     <b>접근 신청 비밀번호:</b> 동료 교사가 "접근 신청"을 할 때 입력하는
@@ -2195,10 +2319,15 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
                     비워두면 접근 신청과 화면 잠금이 모두 꺼집니다. 연도나 "1111" 같은 숫자만으로는
                     짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상으로 정해주세요.
                   </div>
+                  <div className="text-dim small-note gate-pw-hint">
+                    <b>비밀번호 보관:</b> 두 비밀번호 모두 서버에 되돌릴 수 없는 암호(해시)로만 저장돼서
+                    아무도(개설자 본인도) 원래 비밀번호를 다시 볼 수 없어요. 만든 직후 나오는 메모 파일을
+                    꼭 받아 두세요. 이 기기는 이름·이메일 없는 익명 로그인으로 구분돼요.
+                  </div>
                   <div className="text-dim small-note">
                     <Info size={13} /> 이미 있는 학교 코드를 입력하면 새로 만들어지지 않습니다.
                     이때는 개설자 전용 비밀번호가 맞을 때만 개설자로 들어가고, 입력한 다른 설정은
-                    반영되지 않습니다.
+                    반영되지 않습니다. 틀린 비밀번호는 5초에 한 번만 다시 시도할 수 있어요.
                   </div>
                 </div>
               )}
@@ -2374,6 +2503,58 @@ function BlockedScreen({ reason, onRetry }) {
       </div>
     );
   }
+  if (reason === "bad-founder-password" || reason === "code-taken") {
+    return (
+      <div className="paps-app gate-screen">
+        <div className="gate-card">
+          <XCircle size={32} color="#E85D5D" />
+          <h2>{reason === "code-taken" ? "이미 있는 코드예요" : "개설자 전용 비밀번호가 맞지 않아요"}</h2>
+          <p className="gate-desc">
+            {reason === "code-taken"
+              ? "다른 선생님이 이미 쓰고 있는 코드라 새로 만들 수 없어요. 내가 만든 코드라면 개설자 전용 비밀번호를 정확히 입력해 주시고, 아니라면 다른 코드 이름을 골라 주세요."
+              : "코드와 개설자 전용 비밀번호를 다시 확인해 주세요. 연달아 시도했다면 5초 뒤에 다시 해 주세요. 동료 선생님이 만든 코드라면 \"접근 신청\"으로 들어와 주세요."}
+          </p>
+          <button className="btn btn-primary" onClick={() => onRetry("code")}>처음으로</button>
+        </div>
+      </div>
+    );
+  }
+  if (reason === "legacy-relogin") {
+    return (
+      <div className="paps-app gate-screen">
+        <div className="gate-card">
+          <ShieldCheck size={32} color="var(--gold)" />
+          <h2>한 번 다시 들어와 주세요</h2>
+          <p className="gate-desc">
+            보안 방식이 바뀌어서(비밀번호 암호화·서버에서 권한 확인) 예전에 들어와 있던 기기도 한 번
+            다시 들어와야 해요. <b>개설자</b>는 처음 화면의 "코드로 로그인"에 코드와 개설자 전용 비밀번호를
+            입력해 주세요. 예전 방식 코드는 이때 새 방식으로 옮겨져요. <b>동료 선생님</b>은 개설자가 한 번
+            로그인한 뒤에 "접근 신청"을 다시 해 주세요(수정 권한은 다시 승인받아야 해요).
+          </p>
+          <div className="gate-btn-row">
+            <button className="btn btn-ghost" onClick={() => onRetry("form")}>접근 신청</button>
+            <button className="btn btn-primary" onClick={() => onRetry("code")}>코드로 로그인</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (reason === "network" || reason === "migrate-failed") {
+    return (
+      <div className="paps-app gate-screen">
+        <div className="gate-card">
+          <AlertTriangle size={32} color="#E85D5D" />
+          <h2>{reason === "migrate-failed" ? "새 방식으로 옮기지 못했어요" : "확인하지 못했어요"}</h2>
+          <p className="gate-desc">
+            {reason === "migrate-failed"
+              ? "예전 데이터를 새 보안 방식으로 옮기는 중에 문제가 생겼어요. 예전 데이터는 그대로 남아 있으니, 인터넷 연결을 확인하고 개설자 전용 비밀번호로 다시 로그인해 주세요."
+              : "인터넷 연결이나 서버 상태 때문에 접근 권한을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요."}
+          </p>
+          <button className="btn btn-primary" onClick={() => onRetry("code")}>처음으로</button>
+        </div>
+      </div>
+    );
+  }
   if (reason === "need-request") {
     return (
       <div className="paps-app gate-screen">
@@ -2407,9 +2588,29 @@ function BlockedScreen({ reason, onRetry }) {
 
 /* ============================== 접근 요청 관리(관리자) ============================== */
 
-function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestore, onDeleteEntry, onTransferFounder, onUndoRecord, settings, setSettings, onOpenShare, isFounder, workspaceCode, showToast }) {
+function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestore, onDeleteEntry, onTransferFounder, onUndoRecord, lockEnabled, isPractice, onChangePasswords, onOpenShare, isFounder, workspaceCode, showToast }) {
   const [showPw, setShowPw] = useState(false);
   const [showFounderPw, setShowFounderPw] = useState(false);
+  const [viewerPwDraft, setViewerPwDraft] = useState("");
+  const [founderPwDraft, setFounderPwDraft] = useState("");
+  const [viewerOff, setViewerOff] = useState(false);
+  const [savingPw, setSavingPw] = useState(false);
+
+  async function savePasswords() {
+    setSavingPw(true);
+    const r = await onChangePasswords({ viewerPassword: viewerPwDraft, founderPassword: founderPwDraft, viewerOff });
+    setSavingPw(false);
+    if (r.ok) {
+      setViewerPwDraft("");
+      setFounderPwDraft("");
+      setViewerOff(false);
+      showToast("비밀번호를 바꿨어요. 새 비밀번호는 메모해 두세요(다시 보여줄 수 없어요).", "ok");
+    } else if (r.reason === "empty") {
+      showToast("바꿀 새 비밀번호를 입력해 주세요.", "warn");
+    } else {
+      showToast("비밀번호를 바꾸지 못했어요. 다시 시도해 주세요.", "warn");
+    }
+  }
   const [auditLog, setAuditLog] = useState(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [transferTarget, setTransferTarget] = useState(null);
@@ -2453,29 +2654,36 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           </div>
         )}
         <div className="text-dim small-note">
-          코드를 처음 만들 때 이미 정하셨다면 여기서 확인·변경할 수 있습니다. 아직 안 정하셨거나
-          바꾸고 싶다면 아래에서 설정하세요. 조회는 비밀번호만 맞으면 바로 승인되고, 수정 권한은
-          선생님이 직접 승인해야 합니다. 비워두면 접근 신청 자체가 꺼집니다.
+          조회는 접근 신청 비밀번호만 맞으면 바로 승인되고, 수정 권한은 선생님이 직접 승인해야 해요.
+          비밀번호는 서버에 되돌릴 수 없는 암호(해시)로만 저장돼서, 이 화면에서도 지금 비밀번호를
+          보여줄 수 없어요. 바꿀 때만 새 비밀번호를 적어 주세요(빈 칸은 그대로 유지돼요).
+          {isPractice && " 연습모드의 비밀번호는 위쪽 안내 띠에 적혀 있어요."}
         </div>
         <div className="form-row">
-          <label>접근 신청 비밀번호</label>
+          <label>새 접근 신청 비밀번호 (동료 교사용)</label>
           <div className="pw-row">
             <input
               className="input"
               type={showPw ? "text" : "password"}
-              value={settings.viewerPassword || ""}
-              onChange={e => setSettings({ ...settings, viewerPassword: e.target.value })}
-              placeholder="예: 체육0925"
-              disabled={!isFounder}
+              value={viewerPwDraft}
+              onChange={e => setViewerPwDraft(e.target.value)}
+              placeholder={lockEnabled ? "빈 칸이면 지금 비밀번호 유지" : "지금은 꺼져 있어요 — 새로 정하면 켜져요"}
+              disabled={!isFounder || viewerOff}
             />
             <button className="btn btn-ghost small" onClick={() => setShowPw(v => !v)}>{showPw ? "숨기기" : "보기"}</button>
           </div>
+          {isFounder && lockEnabled && (
+            <label className="gate-agree">
+              <input type="checkbox" checked={viewerOff} onChange={e => setViewerOff(e.target.checked)} />
+              접근 신청 끄기(접근 신청 비밀번호 없애기 — 화면 잠금도 함께 꺼져요)
+            </label>
+          )}
         </div>
         <div className="text-dim small-note">
-          비밀번호를 바꾸면 예전 비밀번호로는 신청할 수 없습니다. 이미 승인된 선생님을 막으려면
+          비밀번호를 바꾸면 예전 비밀번호로는 신청할 수 없어요. 이미 승인된 선생님을 막으려면
           아래 목록에서 따로 취소해야 해요. 이 비밀번호는 아래 "빔프로젝터 화면 잠금"과 공용 PC
-          자동 잠금을 풀 때도 쓰입니다.
-          연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상을 권장합니다.
+          자동 잠금을 풀 때도 쓰여요. 틀린 비밀번호는 5초에 한 번만 다시 입력할 수 있어요.
+          연도나 "1111" 같은 숫자만으로는 짐작되기 쉬우니, 영문+숫자를 섞어 6자 이상을 권장해요.
         </div>
 
         {isFounder && (
@@ -2484,23 +2692,29 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
             <h3>개설자 전용 비밀번호</h3>
             <div className="text-dim small-note">
               다른 기기(휴대폰↔컴퓨터 등)에서 이 코드와 이 비밀번호를 함께 입력하면, 승인 절차
-              없이 곧바로 개설자로 다시 들어올 수 있습니다. <b>동료 교사에게는 절대 알려주지
-              마세요</b> — 이걸 아는 사람은 누구나 개설자 전권을 갖게 됩니다.
+              없이 곧바로 개설자로 다시 들어올 수 있어요. <b>동료 교사에게는 절대 알려주지
+              마세요</b> — 이걸 아는 사람은 누구나 개설자 전권을 갖게 돼요. 개설자 권한을 넘겨받았다면
+              이전 개설자가 알던 비밀번호이니 여기서 새로 바꿔 주세요.
             </div>
             <div className="form-row">
-              <label>개설자 전용 비밀번호</label>
+              <label>새 개설자 전용 비밀번호</label>
               <div className="pw-row">
                 <input
                   className="input"
                   type={showFounderPw ? "text" : "password"}
-                  value={settings.founderPassword || ""}
-                  onChange={e => setSettings({ ...settings, founderPassword: e.target.value })}
-                  placeholder="예: 원장선생님0925"
+                  value={founderPwDraft}
+                  onChange={e => setFounderPwDraft(e.target.value)}
+                  placeholder="빈 칸이면 지금 비밀번호 유지"
                 />
                 <button className="btn btn-ghost small" onClick={() => setShowFounderPw(v => !v)}>{showFounderPw ? "숨기기" : "보기"}</button>
               </div>
             </div>
           </>
+        )}
+        {isFounder && (
+          <button className="btn btn-primary" onClick={savePasswords} disabled={savingPw}>
+            {savingPw ? "저장 중..." : "비밀번호 바꾸기"}
+          </button>
         )}
 
         <div className="divider" />
@@ -2511,7 +2725,7 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           있습니다. 전광판 창을 나가려면 위 비밀번호를 입력해야 해서, 자리를 비운 사이 학생 등이
           함부로 다른 화면을 열 수 없습니다.
           <b> 원래 창은 잠기지 않아 계속 작업할 수 있고, 동료 선생님 화면에도 영향을 주지 않습니다.</b>
-          {!settings.viewerPassword && " 비밀번호를 설정하지 않으면 잠기지 않고 바로 나가집니다."}
+          {!lockEnabled && " 지금은 접근 신청 비밀번호가 없어서 잠기지 않고 바로 나가져요."}
         </div>
       </div>
 
@@ -2758,8 +2972,9 @@ function BoardLockPrompt({ onUnlock, onCancel, error }) {
 // 공용 PC(체육관·교무실 공용 컴퓨터 등)에 마감 처리 전 상태로 화면이 켜진 채 방치되는 것을
 // 막기 위한 자동 잠금. 한동안(10~15분) 마우스·키보드 조작이 없으면 화면을 잠그고, 접근 신청
 // 비밀번호를 다시 입력해야 계속 쓸 수 있게 한다. 뒤로가기/닫기로 우회할 수 없도록 "취소"
-// 버튼을 두지 않는다(단, 브라우저를 새로고침하면 다시 열릴 수 있음 — 이 프로그램 전체가
-// "코드를 아는 사람은 접근 가능" 수준의 보안이라는 점과 같은 한계).
+// 버튼을 두지 않는다. 잠긴 상태는 이 기기에 표시해 두어 새로고침해도 다시 잠기며, 비밀번호는
+// 서버 보안 규칙이 해시로 확인한다. 다만 이 기기는 이미 구성원으로 인정된 상태라, 화면 잠금은
+// 지나가는 사람이 들여다보는 것을 막는 장치이지 서버 권한 자체를 거두는 것은 아니다.
 function IdleLockScreen({ onUnlock, error }) {
   const [pw, setPw] = useState("");
   return (
@@ -2801,6 +3016,7 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
       "접근 신청 비밀번호(동료 교사용): " + (viewerPassword || "(설정 안 함)"),
       "개설자 전용 비밀번호(본인만): " + (founderPassword || "(설정 안 함)"),
       "",
+      "비밀번호는 서버에 암호(해시)로만 저장되어 프로그램에서도 다시 보여줄 수 없습니다.",
       "이 파일을 잃어버리면 비밀번호를 되찾을 방법이 없습니다. 안전한 곳에 보관하세요.",
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/plain" });
@@ -2822,12 +3038,13 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
         </div>
         <div className="modal-body">
           <div className="text-dim small-note">
-            이 코드와 비밀번호는 <b>이메일이나 계정이 없어 잊어버리면 되찾을 방법이 없습니다.</b>
-            아래 버튼으로 메모 파일을 받아 꼭 저장해 두세요(개인 노트, 클라우드 드라이브 등).
+            이 코드와 비밀번호는 <b>이메일이나 계정이 없어 잊어버리면 되찾을 방법이 없어요.</b>
+            비밀번호는 서버에 되돌릴 수 없는 암호(해시)로만 저장돼서, 이 창을 닫으면 프로그램에서도
+            다시 보여줄 수 없어요. 아래 버튼으로 메모 파일을 받아 안전한 곳에 꼭 저장해 두세요.
           </div>
           <div className="closeout-summary">
             학교 코드: <b>{workspaceCode}</b><br />
-            접근 신청 비밀번호: <b>{viewerPassword || "설정 안 함"}</b><br />
+            접근 신청 비밀번호: <b>{viewerPassword || "설정 안 함(접근 신청 꺼짐)"}</b><br />
             개설자 전용 비밀번호: <b>{founderPassword || "설정 안 함"}</b>
           </div>
           <button className="btn btn-primary big-btn" onClick={downloadMemo}>
