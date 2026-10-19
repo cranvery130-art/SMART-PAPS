@@ -1,7 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import PapsApp from "./App.jsx";
-import { initAnalyticsIfSupported } from "./firebase.js";
 
 // 빔프로젝터 고정모드에서 연 "새 창"은 주소창에 ?present=1&code=학교코드 형태로 열린다.
 // (App.jsx의 onEnterPresentation이 이 주소를 만들어 새 창을 연다.) 이 값을 읽어서
@@ -12,7 +11,6 @@ const codeParam = params.get("code") || null;
 // 프로그램 안 "사용 가이드"의 "연습모드 새 창으로 열기"는 ?practice=1 로 새 창을 연다.
 const practiceParam = params.get("practice") === "1" && !presentParam;
 
-initAnalyticsIfSupported();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

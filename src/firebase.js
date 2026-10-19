@@ -16,21 +16,8 @@ const firebaseConfig = {
   storageBucket: "smart-paps.firebasestorage.app",
   messagingSenderId: "17788001226",
   appId: "1:17788001226:web:87eb3637c8cae987cacd33",
-  measurementId: "G-LHB4B661ZP",
+  // measurementId(Google 애널리틱스)는 넣지 않는다 — 학생·교사 사용 기록을 외부 분석 서비스로 보내지 않기 위해서다.
 };
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const db = getFirestore(firebaseApp);
-
-// Analytics는 브라우저 환경에서만, 그리고 선택적으로만 초기화한다(측정 기능이 없어도
-// 프로그램 동작에는 전혀 영향이 없으므로 실패해도 조용히 무시한다).
-export async function initAnalyticsIfSupported() {
-  try {
-    const { getAnalytics, isSupported } = await import("firebase/analytics");
-    if (await isSupported()) {
-      getAnalytics(firebaseApp);
-    }
-  } catch (e) {
-    // 분석 기능은 핵심 기능이 아니므로 실패해도 무시한다.
-  }
-}
