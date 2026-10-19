@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Trophy, Medal, RefreshCw, Plus, Trash2, Users,
@@ -727,11 +727,14 @@ async function seedPracticeWorkspace() {
 /* ============================== 메인 앱 ============================== */
 
 const SCREEN_MODE_KEY = "smartpaps_screen_mode";
-// 화면 모드: 기본(어두운 화면) 외에 눈 보호용 두 가지를 둔다.
+// 화면 모드: 기본(양쌤스튜디오 톤의 밝은 화면), 어두운 화면, 눈 보호용 두 가지를 둔다.
+//  - ys: 양쌤스튜디오 홈페이지와 같은 따뜻한 종이색 + 남색 + 코트 주황 화면(기본)
+//  - dark: 예전 기본이던 어두운 화면
 //  - paper: 밝은 곳(교실·체육관·운동장 스마트폰)에서 쓰는 따뜻한 종이색 화면
 //  - night: 어두운 곳·저녁에 쓰는, 밝기와 푸른빛을 크게 낮춘 화면
 const SCREEN_MODES = [
-  { id: "default", label: "기본 모드" },
+  { id: "ys", label: "기본 · 양쌤" },
+  { id: "dark", label: "어두운 화면" },
   { id: "paper", label: "눈 보호 · 종이" },
   { id: "night", label: "눈 보호 · 야간" },
 ];
@@ -739,22 +742,23 @@ function readScreenMode() {
   try {
     let v = window.localStorage.getItem(SCREEN_MODE_KEY);
     if (v === "comfort") v = "night"; // 직전 버전 이름 호환
+    if (v === "default") v = "ys"; // 예전 기본(어두운 화면)은 새 기본으로 옮겨요. 어두운 화면은 메뉴에서 다시 고를 수 있어요
     if (SCREEN_MODES.some(m => m.id === v)) return v;
   } catch (e) {}
-  return "default";
+  return "ys";
 }
 
 export default function PapsApp({ initialWorkspaceCode = null, forcePresentation = false, autoStartPractice = false } = {}) {
   const [workspaceCode, setWorkspaceCode] = useState(initialWorkspaceCode);
   const isPractice = workspaceCode === PRACTICE_CODE;
-  // 화면 모드(기본 / 눈 보호 · 종이 / 눈 보호 · 야간)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
+  // 화면 모드(기본 · 양쌤 / 어두운 화면 / 눈 보호 · 종이 / 눈 보호 · 야간)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
   // 아니라 "이 기기"에만 저장한다. 그래서 개설자·동료 교사 누구나 각자 바꿀 수 있고, 첫 화면과
   // 같은 기기에서 연 빔프로젝터 새 창에도 똑같이 적용된다.
   const [screenMode, setScreenMode] = useState(readScreenMode);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     root.setAttribute("data-screen-mode", screenMode);
-    if (screenMode === "default") root.removeAttribute("data-eye-care");
+    if (screenMode === "dark") root.removeAttribute("data-eye-care");
     else root.setAttribute("data-eye-care", "on");
   }, [screenMode]);
   function changeScreenMode(next) {
@@ -2112,12 +2116,31 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 function IntroSplash({ onDone }) {
   const [fading, setFading] = useState(false);
   const title = "SMART PAPS";
+  const heroRef = useRef(null);
+  // PAPS 다섯 영역 배지: 양쌤 얼굴에서 부채꼴로 퍼져 나가요
+  const badges = [
+    { icon: "🏃", label: "심폐지구력", x: -132, y: -10 },
+    { icon: "🤸", label: "유연성", x: -98, y: -96 },
+    { icon: "💪", label: "근력·근지구력", x: 0, y: -134 },
+    { icon: "⚡", label: "순발력", x: 98, y: -96 },
+    { icon: "⚖️", label: "체지방", x: 132, y: -10 },
+  ];
+
+  // 화면이 열리는 원의 중심을 얼굴 자리에 맞춰요
+  useLayoutEffect(() => {
+    const el = heroRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const root = el.closest(".intro-splash");
+    root.style.setProperty("--fx", `${r.left + r.width / 2}px`);
+    root.style.setProperty("--fy", `${r.top + r.height / 2}px`);
+  }, []);
 
   useEffect(() => {
     let reduced = false;
     try { reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* 무시 */ }
     if (reduced) { onDone(); return; }
-    const holdTimer = setTimeout(() => setFading(true), 2300);
+    const holdTimer = setTimeout(() => setFading(true), 2900);
     return () => clearTimeout(holdTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2129,21 +2152,24 @@ function IntroSplash({ onDone }) {
   }, [fading, onDone]);
 
   return (
-    <div className={"paps-app intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)}>
-      <div className="intro-splash-glow" />
-      <div className="intro-splash-emblem">
-        <Medal size={64} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
-        <Trophy size={104} className="intro-icon intro-icon-main" style={{ animationDelay: "0.2s" }} />
-        <Award size={64} className="intro-icon intro-icon-side" style={{ animationDelay: "0.05s" }} />
+    <div className={"intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)} role="img" aria-label="SMART PAPS 시작 화면">
+      <div className="intro-reveal" aria-hidden="true"><div className="intro-floor" /></div>
+      <div className="intro-hero" ref={heroRef} aria-hidden="true">
+        <span className="intro-ring" />
+        <span className="intro-ring r2" />
+        {badges.map((b, i) => (
+          <span key={b.label} className="intro-badge" title={b.label} style={{ "--x": b.x + "px", "--y": b.y + "px", animationDelay: (0.55 + i * 0.08) + "s" }}>{b.icon}</span>
+        ))}
+        <img src="/icons/yangssaem-face.webp" alt="" />
       </div>
       <div className="intro-splash-title" aria-label={title}>
         {/* 글자를 단어 단위로 묶어서, 화면이 좁아도 "SMART PAP / S"처럼 단어 중간에서 줄이 바뀌지 않게 한다. */}
         {title.split(" ").map((word, w, words) => {
           const start = words.slice(0, w).join(" ").length + (w > 0 ? 1 : 0);
           return (
-            <span key={w} className="intro-word">
+            <span key={w} className={"intro-word" + (w === 1 ? " intro-word-accent" : "")}>
               {word.split("").map((ch, i) => (
-                <span key={i} className="intro-letter" style={{ animationDelay: (0.42 + (start + i) * 0.045) + "s" }}>
+                <span key={i} className="intro-letter" style={{ animationDelay: (0.85 + (start + i) * 0.045) + "s" }}>
                   {ch}
                 </span>
               ))}
@@ -2151,9 +2177,11 @@ function IntroSplash({ onDone }) {
           );
         })}
       </div>
-      <div className="intro-splash-tagline" style={{ animationDelay: "1.1s" }}>
+      <div className="intro-splash-tagline" style={{ animationDelay: "1.4s" }}>
         측정부터 등급, 나이스 제출까지 <span className="intro-nowrap">— 한 번에</span>
       </div>
+      <div className="intro-bar" aria-hidden="true"><i /></div>
+      <div className="intro-sign">YANGSSAEM STUDIO · PAPS</div>
     </div>
   );
 }
@@ -2204,6 +2232,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
     return (
       <div className="paps-app gate-screen">
         <div className="gate-card">
+          <div className="gate-maker"><img src="/icons/yangssaem-face.webp" alt="" width="24" height="24" /><span><b>양쌤스튜디오</b> · 팝스</span></div>
           <div className="gate-brand">
             <Trophy size={26} color="var(--gold)" />
             <span className="gate-brand-name">SMART PAPS</span>
@@ -2921,7 +2950,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           <span className="now-text">{nowText}</span>
         </div>
         {onChangeScreenMode && (
-          <label className={"screen-mode-select" + (screenMode !== "default" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용됩니다">
+          <label className={"screen-mode-select" + (screenMode !== "ys" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용됩니다">
             <Eye size={14} />
             <select value={screenMode} onChange={e => onChangeScreenMode(e.target.value)} aria-label="화면 모드 선택">
               {SCREEN_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -6876,7 +6905,7 @@ function PapsStyles({ children }) {
   return (
     <div>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Jua&display=swap');
 
         .paps-app {
           /* P.A.I Studio 홈페이지와 통일한 다크 톤(무채색 베이스 + 코랄-퍼플 그라디언트 강조).
@@ -6921,61 +6950,76 @@ function PapsStyles({ children }) {
         }
         .paps-app * { box-sizing: border-box; }
 
+        /* 시작 스플래시: 양쌤스튜디오 톤(따뜻한 종이색 + 남색 + 코트 주황). 화면 모드와 상관없이 같은 모습이에요.
+           양쌤 얼굴이 튀어나오고, 얼굴에서 물결과 함께 체육관이 열리며 PAPS 다섯 영역 배지가 퍼져 나가요. */
         .intro-splash {
           position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column;
-          align-items: center; justify-content: center; gap: clamp(14px, 3vh, 26px); overflow: hidden;
+          align-items: center; justify-content: center; gap: clamp(12px, 2.4vh, 20px); overflow: hidden;
           cursor: pointer; opacity: 1; transition: opacity 0.6s ease; padding: 24px; text-align: center;
+          background: #F8F3EA; color: #1D2747;
+          font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
         }
         .intro-splash.intro-fading { opacity: 0; }
-        .intro-splash-glow {
-          position: absolute; top: 50%; left: 50%; width: min(140vw, 900px); height: min(140vw, 900px);
-          transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
-          background: radial-gradient(circle, rgba(255,201,60,0.3) 0%, transparent 68%);
-          animation: introGlowPulse 2.4s ease-in-out infinite;
+        .intro-reveal {
+          position: absolute; inset: 0; pointer-events: none;
+          background: radial-gradient(circle at var(--fx, 50%) var(--fy, 40%), #FCE7CB 0, #F8F3EA 60%);
+          clip-path: circle(0 at var(--fx, 50%) var(--fy, 40%));
+          animation: introReveal 0.8s 0.45s cubic-bezier(0.6, 0, 0.3, 1) forwards;
         }
-        @keyframes introGlowPulse {
-          0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
-          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.12); }
+        @keyframes introReveal { to { clip-path: circle(150vmax at var(--fx, 50%) var(--fy, 40%)); } }
+        .intro-floor { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; background: linear-gradient(180deg, #F0CF9F, #E6B577); box-shadow: inset 0 10px 0 rgba(255,255,255,0.35); }
+        .intro-floor::before { content: ""; position: absolute; left: 0; right: 0; top: 34%; height: 4px; background: rgba(255,255,255,0.9); }
+        .intro-hero { position: relative; width: 124px; height: 124px; margin-top: 110px; z-index: 1; }
+        .intro-hero img {
+          position: relative; z-index: 2; width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
+          border: 5px solid #FFFDF8; box-shadow: 0 0 0 4px #E2622B, 0 18px 40px -14px rgba(29,39,71,0.45);
+          animation: introFacePop 0.55s cubic-bezier(0.2, 1.5, 0.4, 1) both;
         }
-        .intro-splash-emblem { display: flex; align-items: flex-end; gap: clamp(10px, 4vw, 24px); position: relative; z-index: 1; }
-        .intro-icon {
-          color: var(--gold); opacity: 0; filter: drop-shadow(0 0 22px rgba(255,201,60,0.65));
-          animation: introIconDrop 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+        @keyframes introFacePop { from { transform: scale(0); } to { transform: scale(1); } }
+        .intro-ring { position: absolute; inset: 0; border-radius: 50%; border: 3px solid #E2622B; opacity: 0; animation: introRing 1s 0.3s ease-out both; }
+        .intro-ring.r2 { border-color: #F2B33D; animation-delay: 0.5s; }
+        @keyframes introRing { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(3.4); opacity: 0; } }
+        .intro-badge {
+          position: absolute; left: 50%; top: 50%; z-index: 1; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+          border-radius: 50%; display: grid; place-items: center; font-size: 22px;
+          background: #FFFDF8; border: 1px solid #EAE0CF; box-shadow: 0 8px 18px -10px rgba(29,39,71,0.45);
+          opacity: 0; animation: introBadgeOut 0.6s cubic-bezier(0.2, 1.3, 0.4, 1) forwards;
         }
-        .intro-icon-main { width: clamp(72px, 22vw, 128px) !important; height: clamp(72px, 22vw, 128px) !important; }
-        .intro-icon-side {
-          color: var(--silver); filter: drop-shadow(0 0 12px rgba(200,210,220,0.45)); margin-bottom: clamp(4px, 1.5vw, 10px);
-          width: clamp(42px, 13vw, 78px) !important; height: clamp(42px, 13vw, 78px) !important;
-        }
-        @keyframes introIconDrop {
-          0% { opacity: 0; transform: translateY(-46px) scale(0.7); }
-          60% { opacity: 1; }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
+        @keyframes introBadgeOut { 0% { transform: scale(0.3); opacity: 0; } 100% { transform: translate(var(--x), var(--y)); opacity: 1; } }
         .intro-splash-title {
-          display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.28em; row-gap: 0.04em;
-          font-family: var(--display); line-height: 1.05;
-          font-size: clamp(32px, 11vw, 84px); font-weight: 700; letter-spacing: clamp(1px, 0.5vw, 3px);
-          color: var(--text); position: relative; z-index: 1; max-width: 100%;
+          display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.26em; row-gap: 0.04em;
+          font-family: 'Jua', 'IBM Plex Sans KR', sans-serif; line-height: 1.05;
+          font-size: clamp(38px, 10vw, 72px); font-weight: 400; letter-spacing: 0.02em;
+          color: #1D2747; position: relative; z-index: 1; max-width: 100%; margin-top: 6px;
         }
         .intro-word { display: inline-flex; white-space: nowrap; }
+        .intro-word-accent { color: #E2622B; }
         .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
         @keyframes introLetterDrop {
           0% { opacity: 0; transform: translateY(-22px); }
           100% { opacity: 1; transform: translateY(0); }
         }
         .intro-splash-tagline {
-          font-size: clamp(14px, 4vw, 20px); color: var(--text-dim); opacity: 0; position: relative; z-index: 1;
+          font-size: clamp(14px, 3.8vw, 18px); color: #4B5373; opacity: 0; position: relative; z-index: 1;
           line-height: 1.5; word-break: keep-all; text-wrap: balance; max-width: 28em;
           animation: introFadeUp 0.6s ease forwards;
         }
         .intro-nowrap { white-space: nowrap; }
         @keyframes introFadeUp {
           0% { opacity: 0; transform: translateY(10px); }
-          100% { opacity: 0.85; transform: translateY(0); }
+          100% { opacity: 1; transform: translateY(0); }
         }
+        .intro-bar { position: relative; z-index: 1; width: 120px; height: 5px; border-radius: 5px; background: #EAE0CF; overflow: hidden; opacity: 0; animation: introFadeUp 0.4s 1.4s ease forwards; }
+        .intro-bar i { display: block; height: 100%; background: linear-gradient(100deg, #E2622B, #EE8A3A 55%, #F2B33D); transform-origin: left; animation: introLoad 2.6s 0.2s ease both; }
+        @keyframes introLoad { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        .intro-sign { position: absolute; left: 0; right: 0; bottom: max(20px, env(safe-area-inset-bottom)); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.18em; color: #4B5373; }
+        @media (max-height: 600px) { .intro-floor { display: none; } .intro-hero { margin-top: 80px; width: 96px; height: 96px; } }
         @media (prefers-reduced-motion: reduce) {
-          .intro-splash, .intro-icon, .intro-letter, .intro-splash-tagline, .intro-splash-glow { animation: none !important; opacity: 1 !important; transform: none !important; }
+          .intro-splash *, .intro-splash { animation: none !important; }
+          .intro-letter, .intro-splash-tagline, .intro-bar { opacity: 1 !important; transform: none !important; }
+          .intro-reveal { clip-path: none; }
+          .intro-badge { opacity: 1; transform: translate(var(--x), var(--y)); }
+          .intro-ring { display: none; }
         }
 
         .paps-loading {
@@ -6995,6 +7039,9 @@ function PapsStyles({ children }) {
         }
         .gate-card h2 { font-family: var(--display); font-size: 19px; margin: 6px 0 0; font-weight: 600; letter-spacing: 0.2px; }
         .gate-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 0 0 8px; }
+        .gate-maker { display: flex; width: fit-content; align-items: center; gap: 8px; margin: 0 auto 12px; padding: 3px 12px 3px 3px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--text-dim); font-size: 12px; }
+        .gate-maker img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1.5px solid #E2622B; }
+        .gate-maker b { color: var(--text); }
         .gate-brand { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 4px; }
         .gate-brand-name { font-family: var(--display); font-size: 23px; font-weight: 700; letter-spacing: 1px; color: var(--gold); }
         .gate-tagline { font-size: 13px; color: var(--text-dim); text-align: center; margin: 0 0 8px; line-height: 1.6; }
@@ -7830,7 +7877,9 @@ function PapsStyles({ children }) {
            읽힌다. 새하얀 바탕 대신 누런 종이색, 새까만 글자 대신 짙은 갈색 글자를 써서
            눈부심과 푸른빛을 줄이고, 강조색은 눈에 편한 녹색 계열 한 가지만 쓴다. */
         html[data-screen-mode="paper"] .paps-app,
-        html[data-screen-mode="paper"] .modal-backdrop {
+        html[data-screen-mode="ys"] .paps-app,
+        html[data-screen-mode="paper"] .modal-backdrop,
+        html[data-screen-mode="ys"] .modal-backdrop {
           --bg: #EFE7D6;
           --surface: #F7F1E4;
           --surface-2: #E8DFCB;
@@ -7857,24 +7906,78 @@ function PapsStyles({ children }) {
           --text-dim: #6A5F4E;
           color-scheme: light;
         }
-        html[data-screen-mode="paper"] .topnav { background: rgba(239,231,214,0.95); }
-        html[data-screen-mode="paper"] .modal-backdrop { background: rgba(58,50,39,0.35); }
-        html[data-screen-mode="paper"] .idle-lock-backdrop { background: rgba(239,231,214,0.98); }
-        html[data-screen-mode="paper"] .paps-app ::-webkit-scrollbar-thumb { background: #C4B699; }
+        html[data-screen-mode="paper"] .topnav,
+        html[data-screen-mode="ys"] .topnav { background: rgba(239,231,214,0.95); }
+        html[data-screen-mode="paper"] .modal-backdrop,
+        html[data-screen-mode="ys"] .modal-backdrop { background: rgba(58,50,39,0.35); }
+        html[data-screen-mode="paper"] .idle-lock-backdrop,
+        html[data-screen-mode="ys"] .idle-lock-backdrop { background: rgba(239,231,214,0.98); }
+        html[data-screen-mode="paper"] .paps-app ::-webkit-scrollbar-thumb,
+        html[data-screen-mode="ys"] .paps-app ::-webkit-scrollbar-thumb { background: #C4B699; }
         /* 어두운 배경을 전제로 밝은 색을 직접 지정해 둔 안내 문구들을 종이 바탕에서도 읽히게 */
-        html[data-screen-mode="paper"] .info-banner { color: #2F6B63; background: rgba(61,127,119,0.12); }
-        html[data-screen-mode="paper"] .warn-banner { color: #8E3530; background: rgba(176,64,56,0.1); }
-        html[data-screen-mode="paper"] .warn-note { color: #7A5512; background: rgba(168,122,30,0.12); }
-        html[data-screen-mode="paper"] .warn-note.official-note { color: #3F6E44; background: rgba(63,127,70,0.1); }
-        html[data-screen-mode="paper"] .closeout-confirm-warn { color: #7A5512; }
-        html[data-screen-mode="paper"] .closeout-backup-done { color: #3F6E44; }
-        html[data-screen-mode="paper"] .access-type-badge.editor { color: #8E4A2E; background: rgba(156,98,54,0.14); }
+        html[data-screen-mode="paper"] .info-banner,
+        html[data-screen-mode="ys"] .info-banner { color: #2F6B63; background: rgba(61,127,119,0.12); }
+        html[data-screen-mode="paper"] .warn-banner,
+        html[data-screen-mode="ys"] .warn-banner { color: #8E3530; background: rgba(176,64,56,0.1); }
+        html[data-screen-mode="paper"] .warn-note,
+        html[data-screen-mode="ys"] .warn-note { color: #7A5512; background: rgba(168,122,30,0.12); }
+        html[data-screen-mode="paper"] .warn-note.official-note,
+        html[data-screen-mode="ys"] .warn-note.official-note { color: #3F6E44; background: rgba(63,127,70,0.1); }
+        html[data-screen-mode="paper"] .closeout-confirm-warn,
+        html[data-screen-mode="ys"] .closeout-confirm-warn { color: #7A5512; }
+        html[data-screen-mode="paper"] .closeout-backup-done,
+        html[data-screen-mode="ys"] .closeout-backup-done { color: #3F6E44; }
+        html[data-screen-mode="paper"] .access-type-badge.editor,
+        html[data-screen-mode="ys"] .access-type-badge.editor { color: #8E4A2E; background: rgba(156,98,54,0.14); }
         html[data-screen-mode="paper"] .gate-error,
+        html[data-screen-mode="ys"] .gate-error,
         html[data-screen-mode="paper"] .tab-danger,
+        html[data-screen-mode="ys"] .tab-danger,
         html[data-screen-mode="paper"] .closeout-title,
-        html[data-screen-mode="paper"] .closeout-confirm-big { color: #B03A34; }
+        html[data-screen-mode="ys"] .closeout-title,
+        html[data-screen-mode="paper"] .closeout-confirm-big,
+        html[data-screen-mode="ys"] .closeout-confirm-big { color: #B03A34; }
         html[data-screen-mode="paper"] .tab-danger:hover,
-        html[data-screen-mode="paper"] .tab-danger.active { color: #9A2F2A; }
+        html[data-screen-mode="ys"] .tab-danger:hover,
+        html[data-screen-mode="paper"] .tab-danger.active,
+        html[data-screen-mode="ys"] .tab-danger.active { color: #9A2F2A; }
+
+        /* ================= 기본 · 양쌤 =================
+           양쌤스튜디오 홈페이지와 같은 톤: 따뜻한 종이색 바탕, 남색 글자, 코트 주황 강조.
+           밝은 화면용 보정(안내 문구 색 등)은 위 '종이' 모드 규칙을 함께 쓰고, 색 값만 여기서 덮어써요. */
+        html[data-screen-mode="ys"] .paps-app,
+        html[data-screen-mode="ys"] .modal-backdrop {
+          --bg: #F8F3EA;
+          --surface: #FFFDF8;
+          --surface-2: #F2EADC;
+          --ink: #F8F3EA;
+          --ink-2: #FFFDF8;
+          --panel: #FFFDF8;
+          --panel-2: #F2EADC;
+          --line: #EAE0CF;
+          --line-2: #D9CBB3;
+          --muted: #6B7088;
+          --track-red: #E2622B;
+          --accent: #C24B16;
+          --accent-2: #3D5AA8;
+          --accent-hover: #A93F10;
+          --accent-soft: rgba(226,98,43,0.12);
+          --on-accent: #FFFDF8;
+          --grad: linear-gradient(100deg, #E2622B 0%, #EE8A3A 55%, #F2B33D 100%);
+          --gold: #A9781A;
+          --silver: #6F7A88;
+          --bronze: #A0622E;
+          --teal: #2F7F78;
+          --good: #1F7F52;
+          --text: #1D2747;
+          --text-dim: #4B5373;
+          --display: 'Jua', 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+          color-scheme: light;
+        }
+        html[data-screen-mode="ys"] .paps-app { background: radial-gradient(ellipse at top, #FFF6E8 0%, var(--bg) 62%); }
+        html[data-screen-mode="ys"] .topnav { background: rgba(248,243,234,0.92); }
+        html[data-screen-mode="ys"] .modal-backdrop { background: rgba(29,39,71,0.35); }
+        html[data-screen-mode="ys"] .idle-lock-backdrop { background: rgba(248,243,234,0.98); }
 
         /* ================= 눈 보호 · 야간 =================
            어두운 장소·저녁용. 기본 모드보다 전체 밝기를 크게 낮추고(글자 밝기 약 70%),
