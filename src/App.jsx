@@ -20,6 +20,11 @@ import {
   makePracticeStudents, makePracticeRecords, makePracticeAccessList,
 } from "./practice.js";
 import { GuidePanel, GuideModal } from "./Guide.jsx";
+import {
+  HEALTH_FILE_KIND, isHealthMarker, mergeLocalHealth, splitHealthForServer, findServerHealthValues,
+  adoptHealthIntoLocal, stripServerHealth, splitHealthAuditEntry, mergeHealthAudit, auditHasServerHealth,
+  stripHealthAudit, clearHealthStore, countHealthRecords, buildHealthExport, importHealthFile,
+} from "./healthLocal.js";
 import { usePwaInstall } from "./pwaInstall.js";
 
 /* ============================== 상수 정의 ============================== */
@@ -450,6 +455,77 @@ function saveLocalNameMap(code, map) {
   }
 }
 const ANONYMOUS_NAME_PLACEHOLDER = "(이름 미확인 - 이 기기)";
+// 건강 기록(BMI·체지방률)을 다른 기기에서 입력해 값이 이 기기에 없을 때 보이는 표시
+const HEALTH_ELSEWHERE_LABEL = "이 기기에 없음";
+const HEALTH_ELSEWHERE_TITLE = "다른 기기에서 측정해 입력했어요. 건강 정보(신장·체중·BMI·체지방률)는 서버에 올리지 않고 입력한 기기에만 저장돼요.";
+
+// ---- 변경 이력에도 학생 실명을 넣지 않는다 ----
+// 서버(Firestore)의 변경 이력에는 학생 id와 "학년-반-번호"만 남기고, 화면에 보여줄 때 이 기기의
+// 이름표로 이름을 찾아 붙인다. 이름표가 없는 기기에서는 "1-1-3 (이름 미확인 - 이 기기)"처럼 보인다.
+function studentLabel(s) {
+  return s ? `${s.grade}-${s.classNum}-${s.number}` : "";
+}
+const AUDIT_LABEL_LIMIT = 30;
+// 학생 추가·삭제 이력 한 건(이름 없이 인원수·학년-반-번호·id만)
+function rosterAuditEntry(by, verb, list) {
+  const labels = list.map(studentLabel);
+  const shown = labels.slice(0, AUDIT_LABEL_LIMIT).join(", ") + (labels.length > AUDIT_LABEL_LIMIT ? ` 외 ${labels.length - AUDIT_LABEL_LIMIT}명` : "");
+  return {
+    type: "access", ts: Date.now(), by, nameless: true,
+    studentIds: list.slice(0, 200).map(s => s.id),
+    message: `${by}님이 학생 ${list.length}명(${shown})을(를) ${verb}함`,
+  };
+}
+// 화면 표시용: 이력 속 학생을 이 기기 이름표로 풀어 쓴다.
+function auditStudentText(a, nameMap) {
+  const name = (a.studentId && nameMap[a.studentId]) || a.studentName || "";
+  const label = a.studentLabel || "";
+  if (name) return label ? `${name}(${label})` : name;
+  if (label) return `${label} ${ANONYMOUS_NAME_PLACEHOLDER}`;
+  return a.studentId ? ANONYMOUS_NAME_PLACEHOLDER : "(삭제된 학생)";
+}
+// 서버 변경 이력에서 학생 이름을 빼낸 사본(한 번만 하는 정리용). 이름은 이 기기 이름표에 없으면
+// 거기로 옮겨 두고, 이름 말고 다른 내용(누가·언제·종목·값·인원수)은 그대로 둔다.
+// 결과: { list, changed }
+function stripAuditStudentNames(code, list, students) {
+  const byId = Object.fromEntries((students || []).map(s => [s.id, s]));
+  const nameMap = loadLocalNameMap(code);
+  const idsByName = {};
+  (students || []).forEach(s => {
+    const n = nameMap[s.id] || (s.name !== ANONYMOUS_NAME_PLACEHOLDER ? s.name : "");
+    if (n) (idsByName[n] = idsByName[n] || []).push(s.id);
+  });
+  let changed = false, nameMapChanged = false;
+  const next = (list || []).map(e => {
+    if (!e || e.nameless) return e;
+    if (e.type === "record" && "studentName" in e) {
+      const { studentName, ...rest } = e;
+      const st = byId[e.studentId];
+      if (st && studentName && studentName !== ANONYMOUS_NAME_PLACEHOLDER && !nameMap[st.id]) {
+        nameMap[st.id] = studentName;
+        nameMapChanged = true;
+      }
+      changed = true;
+      return { ...rest, nameless: true, ...(st && !rest.studentLabel ? { studentLabel: studentLabel(st) } : {}) };
+    }
+    const m = e.type === "access" && typeof e.message === "string" ? e.message.match(/^(.*)님이 학생 (.+)을\(를\) (추가|삭제)함$/) : null;
+    if (m) {
+      const names = m[2].split(", ");
+      const ids = [];
+      names.forEach(n => { const found = idsByName[n]; if (found && found.length === 1) ids.push(found[0]); });
+      const labels = ids.map(id => studentLabel(byId[id])).slice(0, AUDIT_LABEL_LIMIT);
+      changed = true;
+      return {
+        ...e, nameless: true,
+        ...(ids.length > 0 ? { studentIds: ids.slice(0, 200) } : {}),
+        message: `${m[1]}님이 학생 ${names.length}명${labels.length > 0 ? `(${labels.join(", ")}${ids.length > labels.length ? " 외" : ""})` : ""}을(를) ${m[3]}함`,
+      };
+    }
+    return e;
+  });
+  if (nameMapChanged) saveLocalNameMap(code, nameMap);
+  return { list: next, changed };
+}
 // 화면이 알고 있는 학생 이름을 이 기기의 로컬 이름표에 즉시(동기적으로) 반영한다.
 // 이름을 입력/추가한 시점에 곧바로 호출해야 한다 — 네트워크 저장(Firestore 왕복)이 끝나길
 // 기다렸다가 반영하면, 그 사이에 탭을 닫아버릴 경우 이름이 이 기기에 전혀 남지 않게 된다
@@ -506,20 +582,74 @@ async function saveConfigRemote(code, obj) {
     return false;
   }
 }
+// 측정 기록. 신장·체중·BMI·체지방률(건강 정보)은 서버로 보내지 않고 이 기기에만 둔다
+// (healthLocal.js). 불러올 때 이 기기 값을 합치고, 저장할 때 다시 빼낸다.
 async function loadRecordsRemote(code) {
   try {
     const r = await storage.get(recordsKey(code), true);
-    return r ? JSON.parse(r.value) : {};
+    return mergeLocalHealth(code, r ? JSON.parse(r.value) : {});
   } catch (e) {
     return null;
   }
 }
 async function saveRecordsRemote(code, obj) {
   try {
-    await storage.set(recordsKey(code), JSON.stringify(obj), true);
-    return true;
+    const { payload, localOk } = splitHealthForServer(code, obj);
+    if (!localOk) {
+      // 이 기기에 건강 기록을 저장하지 못했다 → 값을 잃지 않도록 이번 서버 저장도 멈춘다.
+      try { window.dispatchEvent(new CustomEvent("paps-health-local-failed")); } catch (e) { /* 알림만 못 띄움 */ }
+      return false;
+    }
+    return await storage.set(recordsKey(code), JSON.stringify(payload), true);
   } catch (e) {
     return false;
+  }
+}
+
+// 한 번만 하는 정리: 예전 버전이 서버(Firestore)에 올려 둔 건강 값(신장·체중·BMI·체지방률)을
+// 이 기기로 옮기고 서버에서는 지운다. 변경 이력에 남아 있던 학생 실명도 함께 빼낸다. 개설자·수정 권한자가 코드를 열 때 실행한다.
+// 순서: ① 이 기기에 먼저 저장 → ② 다시 읽어 확인 → ③ 서버 최신 기록을 다시 받아 값만 빼고 저장.
+// 확인이 안 되면 서버는 건드리지 않는다. 옮길 값이 없으면 아무것도 하지 않으므로 몇 번 실행해도 같다.
+// 결과: { moved: 옮긴 기록 수, failed: 실패 여부 }
+async function moveServerHealthToThisDevice(code, students) {
+  let moved = 0;
+  try {
+    const r = await storage.get(recordsKey(code), true);
+    const raw = r ? JSON.parse(r.value) : {};
+    const found = findServerHealthValues(raw);
+    if (Object.keys(found).length > 0) {
+      if (!adoptHealthIntoLocal(code, found)) return { moved: 0, failed: true };
+      const r2 = await storage.get(recordsKey(code), true);
+      const latest = r2 ? JSON.parse(r2.value) : {};
+      const more = findServerHealthValues(latest); // 그 사이 다른 기기(예전 버전)가 올린 값까지
+      if (Object.keys(more).length > 0 && !adoptHealthIntoLocal(code, more)) return { moved: 0, failed: true };
+      const stripped = stripServerHealth(code, latest);
+      if (!stripped) return { moved: 0, failed: true };
+      const ok = await storage.set(recordsKey(code), JSON.stringify(stripped), true);
+      if (!ok) return { moved: 0, failed: true };
+      moved = Object.keys(more).length;
+    }
+    // 변경 이력: 건강 값은 이 기기로 옮기고, 학생 실명은 빼낸다(이름표에 없던 이름은 이 기기 이름표로).
+    const a = await storage.get(auditLogKey(code), true);
+    let auditList = a ? JSON.parse(a.value) : [];
+    if (Array.isArray(auditList)) {
+      let auditChanged = false;
+      if (auditHasServerHealth(auditList)) {
+        const strippedAudit = stripHealthAudit(code, auditList);
+        if (!strippedAudit) return { moved, failed: true };
+        auditList = strippedAudit;
+        auditChanged = true;
+      }
+      const named = stripAuditStudentNames(code, auditList, students);
+      if (named.changed) {
+        auditList = named.list;
+        auditChanged = true;
+      }
+      if (auditChanged && !(await storage.set(auditLogKey(code), JSON.stringify(auditList), true))) return { moved, failed: true };
+    }
+    return { moved, failed: false };
+  } catch (e) {
+    return { moved, failed: true };
   }
 }
 
@@ -563,7 +693,8 @@ async function appendAuditLog(code, entry) {
       const r = await storage.get(auditLogKey(code), true);
       if (r) list = JSON.parse(r.value);
     } catch (e) { /* 아직 로그가 없으면 새로 시작 */ }
-    list.push(entry);
+    // 건강 종목(BMI·체지방률)의 바뀐 값은 서버 이력에 남기지 않고 이 기기에만 둔다.
+    list.push(splitHealthAuditEntry(code, entry));
     if (list.length > 300) list = list.slice(list.length - 300);
     await storage.set(auditLogKey(code), JSON.stringify(list), true);
   } catch (e) {
@@ -573,7 +704,7 @@ async function appendAuditLog(code, entry) {
 async function loadAuditLog(code) {
   try {
     const r = await storage.get(auditLogKey(code), true);
-    return r ? JSON.parse(r.value) : [];
+    return mergeHealthAudit(code, r ? JSON.parse(r.value) : []);
   } catch (e) {
     return [];
   }
@@ -1105,6 +1236,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           await block("network", false);
           return;
         }
+        // 마감(삭제)된 코드라면, 이 기기에 남아 있던 그 코드의 건강 기록·이름표도 함께 지운다.
+        clearHealthStore(workspaceCode);
+        try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) { /* 없어도 무방 */ }
         await block("no-such-code");
         return;
       }
@@ -1347,6 +1481,17 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       // exist yet (first-ever use) and when the read genuinely failed —
       // either way the correct move is to fall back to empty/default data.
       const cfg = await loadConfig(workspaceCode);
+      // 예전 버전이 서버에 올려 둔 건강 값(신장·체중·BMI·체지방률)이 남아 있으면, 기록을 쓸 수 있는
+      // 기기(개설자·수정 권한)가 열 때 이 기기로 옮기고 서버에서는 지운다(한 번만, 이 기기 저장 확인 후).
+      if (role === "admin" && !isPractice) {
+        const moveResult = await moveServerHealthToThisDevice(workspaceCode, cfg?.students || []);
+        if (moveResult.moved > 0) {
+          appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님 기기로 건강 기록(신장·체중·BMI·체지방률) ${moveResult.moved}건을 옮기고 서버에서 지움` });
+          showToast(`서버에 있던 건강 기록 ${moveResult.moved}건을 이 기기로 옮겼어요. 이제 이 기기에만 저장돼요. 데이터 백업 탭에서 파일로 보관해 두세요.`, "ok");
+        } else if (moveResult.failed) {
+          showToast("서버에 남은 건강 기록·이력 정리를 마치지 못했어요(서버 기록은 그대로 둠). 잠시 뒤 다시 열어 주세요.", "warn");
+        }
+      }
       const recs = await loadRecordsRemote(workspaceCode);
       const finalCfg = cfg || (isPractice
         ? buildDefaultConfig(pendingSchoolLevelRef.current, { viewer: PRACTICE_VIEWER_PASSWORD, founder: PRACTICE_FOUNDER_PASSWORD })
@@ -1366,6 +1511,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           await clearSavedWorkspaceCode().catch(() => {});
         }
         try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
+        clearHealthStore(workspaceCode);
         showToast("이 코드가 개설된 지 1년이 지나 자동으로 마감(전체 삭제)되었습니다.", "warn");
         setWorkspaceCode(null);
         setRole(null);
@@ -1591,7 +1737,9 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         type: "record",
         ts: Date.now(),
         by: myDisplayName,
-        studentName: student ? student.name : "(삭제된 학생)",
+        // 서버 이력에는 실명 대신 학년-반-번호만(이름은 화면에서 이 기기 이름표로 찾아 붙임)
+        studentLabel: studentLabel(student),
+        nameless: true,
         eventName: EVENT_MAP[eventId]?.name || eventId,
         prevValue: prevValue ?? null,
         newValue: value,
@@ -1621,7 +1769,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
         setLastSync(Date.now());
         await persistRecords(next);
         appendAuditLog(workspaceCode, {
-          type: "record", ts: Date.now(), by: myDisplayName, studentName: entry.studentName,
+          type: "record", ts: Date.now(), by: myDisplayName, studentLabel: entry.studentLabel || "", nameless: true,
           eventName: entry.eventName, prevValue: entry.newValue, newValue: null,
           studentId: entry.studentId, eventId: entry.eventId, year: entry.year,
           schoolGradeAtMeasure: entry.schoolGradeAtMeasure, prevParts: null,
@@ -1635,6 +1783,27 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     setToast({ text, kind, id: uid("toast") });
     setTimeout(() => setToast(t => (t && t.text === text ? null : t)), 4000);
   }, []);
+
+  // 이 기기에 건강 기록을 저장하지 못해 서버 저장까지 멈췄을 때 알린다(saveRecordsRemote 참고).
+  useEffect(() => {
+    function onHealthLocalFailed() {
+      showToast("이 기기에 건강 기록(신장·체중·BMI·체지방률)을 저장하지 못해 이번 저장을 멈췄어요. 브라우저 저장 공간이나 시크릿 창 여부를 확인해 주세요.", "warn");
+    }
+    window.addEventListener("paps-health-local-failed", onHealthLocalFailed);
+    return () => window.removeEventListener("paps-health-local-failed", onHealthLocalFailed);
+  }, [showToast]);
+
+  // 건강 기록 파일을 불러온 뒤: 화면 기록에 합치고, 다른 기기에도 "측정했음" 표시가 보이도록 저장한다.
+  const handleHealthImported = useCallback(() => {
+    return enqueueSave(async () => {
+      const latest = (await loadRecordsRemote(workspaceCode)) || {};
+      const next = mergeRecords(records, latest);
+      Object.keys(latest).forEach(k => { if (isHealthMarker(next[k]) && !isHealthMarker(latest[k])) next[k] = latest[k]; });
+      setRecords(next);
+      setLastSync(Date.now());
+      if (role === "admin") await persistRecords(next);
+    });
+  }, [workspaceCode, records, role, persistRecords]);
 
   // 무료 요금제 등 자동 저장이 안 되는 환경을 위한 수동 백업/복원.
   const handleImportBackup = useCallback(async (payload) => {
@@ -1685,6 +1854,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     // 이 기기에 남아있던 학생 이름표(익명화를 위해 로컬에만 저장해뒀던 실명 매핑)도 함께
     // 지운다 — 서버 데이터가 사라진 뒤에도 이 브라우저에만 실명이 남아있지 않도록 한다.
     try { window.localStorage.removeItem(nameMapKey(workspaceCode)); } catch (e) {}
+    // 이 기기에만 두었던 건강 기록(신장·체중·BMI·체지방률)도 함께 지운다.
+    clearHealthStore(workspaceCode);
     showToast("마감이 완료되었습니다. 이 학교 코드의 모든 데이터가 삭제되었습니다.", "ok");
     setWorkspaceCode(null);
     setRole(null);
@@ -1713,7 +1884,12 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 
   const studentValue = useCallback((studentId, eventId, year) => {
     const r = records[recKey(studentId, eventId, year)];
-    return r ? r.value : null;
+    return r && !isHealthMarker(r) && r.value !== undefined ? r.value : null;
+  }, [records]);
+
+  // 건강 기록(BMI·체지방률)을 다른 기기에서 입력해서, 값이 이 기기에는 없는 경우
+  const healthElsewhere = useCallback((studentId, eventId, year) => {
+    return isHealthMarker(records[recKey(studentId, eventId, year)]);
   }, [records]);
 
   const studentParts = useCallback((studentId, eventId, year) => {
@@ -1723,7 +1899,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 
   const studentGrade = useCallback((student, eventId, year) => {
     const r = records[recKey(student.id, eventId, year)];
-    if (!r) return null;
+    if (!r || isHealthMarker(r)) return null;
     const gradeAtMeasure = r.schoolGradeAtMeasure || student.grade;
     const bands = getBands(eventId, student.gender, gradeAtMeasure);
     return computeGradeFromBands(r.value, bands);
@@ -1955,7 +2131,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             <span>
               {role === "viewer"
                 ? "지도 목적 확인을 위한 조회 전용 화면입니다. 학생 개인정보인 체력 기록은 지도 목적 외로 저장·공유하지 마세요."
-                : "같은 학교 코드로 접속한 선생님들과 기록이 실시간으로 공유됩니다. 수정 권한이 있는 선생님은 함께 입력·수정할 수 있어요."}
+                : "같은 학교 코드로 접속한 선생님들과 기록이 실시간으로 공유됩니다. 수정 권한이 있는 선생님은 함께 입력·수정할 수 있어요. 단, 신장·체중·BMI·체지방률은 건강 정보라 입력한 기기에만 저장돼요."}
             </span>
             <button className="icon-btn" onClick={() => setBannerDismissed(true)}><X size={14} /></button>
           </div>
@@ -2002,6 +2178,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               onSave={saveNewRecord}
               studentValue={studentValue}
               studentParts={studentParts}
+              healthElsewhere={healthElsewhere}
               settings={settings}
               setSettings={(next) => { setSettings(next); persistConfig(undefined, undefined, next); }}
               showToast={showToast}
@@ -2013,6 +2190,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               activeYear={activeYear}
               studentValue={studentValue}
               studentGrade={studentGrade}
+              healthElsewhere={healthElsewhere}
               settings={settings}
               setSettings={(next) => { setSettings(next); persistConfig(undefined, undefined, next); }}
               isAdmin={role === "admin"}
@@ -2023,15 +2201,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               students={students}
               setStudents={(next) => {
                 // 학생이 추가되거나 삭제된 경우 감사 로그에도 남긴다(누가 언제 몇 명을 바꿨는지).
+                // 서버로 가는 이력이라 이름 대신 인원수·학년-반-번호·id만 남긴다.
                 const prevIds = new Set(students.map(s => s.id));
                 const nextIds = new Set(next.map(s => s.id));
                 const added = next.filter(s => !prevIds.has(s.id));
                 const removed = students.filter(s => !nextIds.has(s.id));
                 if (added.length > 0) {
-                  appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 학생 ${added.map(s => s.name).join(", ")}을(를) 추가함` });
+                  appendAuditLog(workspaceCode, rosterAuditEntry(myDisplayName, "추가", added));
                 }
                 if (removed.length > 0) {
-                  appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 학생 ${removed.map(s => s.name).join(", ")}을(를) 삭제함` });
+                  appendAuditLog(workspaceCode, rosterAuditEntry(myDisplayName, "삭제", removed));
                 }
                 setStudents(next);
                 persistConfig(next, undefined, undefined);
@@ -2048,6 +2227,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               settings={settings}
               activeYear={activeYear}
               onImportBackup={handleImportBackup}
+              onHealthImported={handleHealthImported}
               showToast={showToast}
               workspaceCode={workspaceCode}
               myDisplayName={myDisplayName}
@@ -2648,8 +2828,10 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
   const approved = requests.filter(r => r.status === "approved").sort((a, b) => b.submittedAt - a.submittedAt);
   const denied = requests.filter(r => r.status === "denied").sort((a, b) => b.submittedAt - a.submittedAt);
 
+  const [auditNameMap, setAuditNameMap] = useState({});
   async function loadAuditLogClick() {
     setAuditLoading(true);
+    setAuditNameMap(loadLocalNameMap(workspaceCode));
     const log = await loadAuditLog(workspaceCode);
     setAuditLog(log.slice().reverse().slice(0, 30));
     setAuditLoading(false);
@@ -2833,7 +3015,9 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           <h3>최근 변경 이력</h3>
           <div className="text-dim small-note">
             누가 언제 어떤 학생의 기록을 바꿨는지 최근 항목을 확인할 수 있습니다(최대 300건 보관).
-            성적 관련 문의가 들어왔을 때 참고하세요.
+            성적 관련 문의가 들어왔을 때 참고하세요. 학생 이름은 서버 이력에 남기지 않고 학년-반-번호만 남겨서,
+            이름은 이 기기의 이름표로 찾아 보여줘요(이름표가 없으면 "이름 미확인"). BMI·체지방률은 바뀐 값이 서버에 남지 않아서, 값과 되돌리기는
+            그 기록을 입력한 기기에서만 보여요.
           </div>
           <button className="btn btn-ghost" onClick={loadAuditLogClick} disabled={auditLoading}>
             <RefreshCw size={14} /> {auditLoading ? "불러오는 중..." : "최근 변경 이력 보기"}
@@ -2847,11 +3031,23 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
                   <div className="audit-log-row" key={i}>
                     <span className="audit-log-time">{new Date(a.ts).toLocaleString("ko-KR")}</span>
                     {a.type === "access" ? (
-                      <span>{a.message}</span>
+                      <span>
+                        {a.message}
+                        {Array.isArray(a.studentIds) && a.studentIds.some(id => auditNameMap[id]) && (
+                          <span className="text-dim"> — 이 기기 이름표: {a.studentIds.map(id => auditNameMap[id]).filter(Boolean).slice(0, 30).join(", ")}</span>
+                        )}
+                      </span>
+                    ) : a.healthLocal && !("newValue" in a) ? (
+                      <div className="audit-log-body">
+                        <span>
+                          <b>{a.by}</b>님이 <b>{auditStudentText(a, auditNameMap)}</b>의 {a.eventName} 기록을 {a.cleared ? "삭제" : "입력·변경"}
+                          <span className="text-dim"> (건강 정보라 값은 입력한 기기에만 있어요)</span>
+                        </span>
+                      </div>
                     ) : (
                       <div className="audit-log-body">
                         <span>
-                          <b>{a.by}</b>님이 <b>{a.studentName}</b>의 {a.eventName} 기록을{" "}
+                          <b>{a.by}</b>님이 <b>{auditStudentText(a, auditNameMap)}</b>의 {a.eventName} 기록을{" "}
                           {a.prevValue === null || a.prevValue === undefined ? "새로" : a.prevValue + " →"}{" "}
                           {a.newValue === null ? "삭제" : a.newValue + "로 변경"}
                         </span>
@@ -3130,6 +3326,8 @@ function ShareGuideModal({ workspaceCode, onClose }) {
         <div className="modal-body">
           <div className="text-dim small-note">
             노트북이 없어도 스마트폰으로 실시간 기록을 확인·입력할 수 있게 해주는 기능입니다.
+            신장·체중·BMI·체지방률은 건강 정보라 서버에 올리지 않고 입력한 기기에만 저장되니, 이 종목은
+            학교 업무용 PC에서 입력하는 걸 권해요.
           </div>
           <div className="warn-note">
             <AlertTriangle size={16} />
@@ -3611,7 +3809,7 @@ const EVENT_METHOD_INFO = {
   longjump: { tip: "출발선에서 두 발을 모으고 제자리에서 한 번에 굴러 최대한 멀리 뛰며, 2회 실시해 좋은 기록을 0.1cm 단위로 채택합니다.", videoUrl: "https://www.youtube.com/watch?v=wPm-zaUI8G0" },
 };
 
-function RecordManagementView({ students, records, activeYear, onSave, studentValue, studentParts, settings, setSettings, showToast }) {
+function RecordManagementView({ students, records, activeYear, onSave, studentValue, studentParts, healthElsewhere, settings, setSettings, showToast }) {
   const [eventId, setEventId] = useState(EVENTS[0].id);
   const [grade, setGrade] = useState(null);
   const [classNum, setClassNum] = useState(null);
@@ -3644,11 +3842,11 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
     const stats = {};
     schoolGrades.forEach(g => {
       const pool = students.filter(s => s.grade === g);
-      const done = pool.filter(s => studentValue(s.id, eventId, activeYear) !== null).length;
+      const done = pool.filter(s => studentValue(s.id, eventId, activeYear) !== null || healthElsewhere(s.id, eventId, activeYear)).length;
       stats[g] = { total: pool.length, done };
     });
     return stats;
-  }, [students, eventId, activeYear, studentValue]);
+  }, [students, eventId, activeYear, studentValue, healthElsewhere]);
 
   const classOptions = useMemo(() => {
     if (grade === null) return [];
@@ -3659,11 +3857,11 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
     const stats = {};
     classOptions.forEach(c => {
       const pool = students.filter(s => s.grade === grade && s.classNum === c);
-      const done = pool.filter(s => studentValue(s.id, eventId, activeYear) !== null).length;
+      const done = pool.filter(s => studentValue(s.id, eventId, activeYear) !== null || healthElsewhere(s.id, eventId, activeYear)).length;
       stats[c] = { total: pool.length, done };
     });
     return stats;
-  }, [students, grade, classOptions, eventId, activeYear, studentValue]);
+  }, [students, grade, classOptions, eventId, activeYear, studentValue, healthElsewhere]);
 
   const classStudents = useMemo(() => {
     if (grade === null || classNum === null) return [];
@@ -3673,11 +3871,11 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
   const eventStatsForClass = useMemo(() => {
     const stats = {};
     ALL_EVENTS.forEach(e2 => {
-      const done = classStudents.filter(s => studentValue(s.id, e2.id, activeYear) !== null).length;
+      const done = classStudents.filter(s => studentValue(s.id, e2.id, activeYear) !== null || healthElsewhere(s.id, e2.id, activeYear)).length;
       stats[e2.id] = { done, total: classStudents.length };
     });
     return stats;
-  }, [classStudents, activeYear, studentValue]);
+  }, [classStudents, activeYear, studentValue, healthElsewhere]);
 
   function selectEvent(id) {
     setEventId(id);
@@ -3731,6 +3929,16 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
           ))}
         </div>
       )}
+      {grade !== null && classNum !== null && (eventId === "bmi" || eventId === "bodyfat") && (
+        <div className="health-local-note small-note">
+          <ShieldCheck size={14} />
+          <span>
+            신장·체중·BMI·체지방률은 건강 정보라서 서버에 올리지 않고 <b>입력한 이 기기에만</b> 저장해요.
+            다른 기기에서는 "이 기기에 없음"으로 보여요. 되도록 학교 업무용 PC 한 대에서만 입력하고,
+            다른 PC로 옮길 땐 데이터 백업 탭의 "건강 기록 파일"을 쓰세요.
+          </span>
+        </div>
+      )}
       {grade !== null && classNum !== null && eventId === "bmi" && classStudents.length > 0 && (
         <div className="bmi-bulk-toggle-row">
           <span className="text-dim small-note">직접 입력 일괄 설정:</span>
@@ -3742,7 +3950,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
         <div className="drill-students drill-scroll">
           {classStudents.length === 0 && <div className="text-dim">학생이 없습니다.</div>}
           {classStudents.map(s => (
-            <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"}
+            <EventInputRow key={s.id} student={s} eventId={eventId} activeYear={activeYear} studentValue={studentValue} studentParts={studentParts} healthElsewhere={healthElsewhere} onSave={onSave} schoolLevel={settings.schoolLevel || "middle"}
               forceDirectMode={eventId === "bmi" ? { epoch: bmiDirectEpoch, value: bmiDirectForceValue } : undefined} maskNames={maskNames} />
           ))}
         </div>
@@ -4125,9 +4333,10 @@ function GripRow({ student, activeYear, studentValue, studentParts, onSave, mask
 }
 
 // BMI: 신장·체중만 입력하면 자동 계산. 등급을 매기지 않고 또래 평균 대비 위치만 안내한다.
-function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoolLevel, forceDirectMode, maskNames }) {
+function BmiRow({ student, activeYear, studentValue, studentParts, healthElsewhere, onSave, schoolLevel, forceDirectMode, maskNames }) {
   const eventId = "bmi";
   const existing = studentValue(student.id, eventId, activeYear);
+  const elsewhere = existing === null && !!healthElsewhere && healthElsewhere(student.id, eventId, activeYear);
   const parts = studentParts(student.id, eventId, activeYear);
   const [height, setHeight] = useState(parts ? String(parts.height ?? "") : "");
   const [weight, setWeight] = useState(parts ? String(parts.weight ?? "") : "");
@@ -4191,7 +4400,7 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
       <label className="bmi-direct-toggle">
         <input type="checkbox" checked={directMode} onChange={e => setDirectMode(e.target.checked)} /> 직접 입력
       </label>
-      <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? "BMI " + existing : "-"}</span>
+      <span className={"drill-best" + (existing !== null ? " has-value" : "")} title={elsewhere ? HEALTH_ELSEWHERE_TITLE : undefined}>{existing !== null ? "BMI " + existing : elsewhere ? HEALTH_ELSEWHERE_LABEL : "-"}</span>
       {existing !== null && <span className="bmi-ref-tag">{refText}</span>}
     </div>
   );
@@ -4199,9 +4408,10 @@ function BmiRow({ student, activeYear, studentValue, studentParts, onSave, schoo
 
 // 체지방률: 값 하나만 입력. BMI와 동일하게 등급을 매기지 않고, 종합등급에도 반영되지 않는
 // 성장 확인용 참고 지표다(공식 학년·성별 기준표가 없어 분류 문구는 따로 붙이지 않는다).
-function BodyFatRow({ student, activeYear, studentValue, onSave, maskNames }) {
+function BodyFatRow({ student, activeYear, studentValue, healthElsewhere, onSave, maskNames }) {
   const eventId = "bodyfat";
   const existing = studentValue(student.id, eventId, activeYear);
+  const elsewhere = existing === null && !!healthElsewhere && healthElsewhere(student.id, eventId, activeYear);
   const [value, setValue] = useState(existing === null ? "" : String(existing));
 
   useEffect(() => {
@@ -4223,7 +4433,7 @@ function BodyFatRow({ student, activeYear, studentValue, onSave, maskNames }) {
       <span className="drill-student-name">{student.number}. {maskNames ? maskStudentName(student.name) : student.name}</span>
       <input className="input drill-student-input" type="number" step="0.1" value={value} placeholder="체지방률(%)"
         onChange={e => setValue(e.target.value)} onBlur={() => commit(value)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }} />
-      <span className={"drill-best" + (existing !== null ? " has-value" : "")}>{existing !== null ? existing + "%" : "-"}</span>
+      <span className={"drill-best" + (existing !== null ? " has-value" : "")} title={elsewhere ? HEALTH_ELSEWHERE_TITLE : undefined}>{existing !== null ? existing + "%" : elsewhere ? HEALTH_ELSEWHERE_LABEL : "-"}</span>
       {cat && <span className="bmi-ref-tag">{cat}</span>}
     </div>
   );
@@ -4910,7 +5120,7 @@ function LiveCountClassRecorder({ eventId, unit, students, activeYear, onSave, m
 
 /* ============================== 등급표 확인 ============================== */
 
-function GradeTable({ students, activeYear, studentValue, studentGrade, settings, setSettings, isAdmin }) {
+function GradeTable({ students, activeYear, studentValue, studentGrade, healthElsewhere, settings, setSettings, isAdmin }) {
   const [mode, setMode] = useState("students"); // 'students' | 'reference'
   const [schoolGrade, setSchoolGrade] = useState("ALL");
   const [classNum, setClassNum] = useState("ALL");
@@ -5059,7 +5269,9 @@ function GradeTable({ students, activeYear, studentValue, studentGrade, settings
                           return (
                             <td key={ev.id}>
                               {v === null ? (
-                                <span className="text-dim">미측정</span>
+                                healthElsewhere(s.id, ev.id, activeYear)
+                                  ? <span className="text-dim" title={HEALTH_ELSEWHERE_TITLE}>{HEALTH_ELSEWHERE_LABEL}</span>
+                                  : <span className="text-dim">미측정</span>
                               ) : (
                                 <label className="bmi-cell">
                                   <input
@@ -5830,6 +6042,7 @@ function NeisTemplateFiller({ students, records, activeYear, showToast, fillStat
         나이스에서 받은 진짜 양식 파일을 여기에 첨부한 뒤 "반영하기"를 누르면, 이 프로그램의
         기록을 열 이름에 맞춰 자동으로 채워줍니다. "신장"·"체중" 열은 기록관리 탭에서
         입력한 신장·체중 실측값이, "BMI" 열은 그 값으로 계산된 BMI 수치가 채워집니다.
+        신장·체중·BMI·체지방률은 <b>이 기기에 저장된 값만</b> 채워져요(다른 기기에서 입력한 값은 빈칸).
         <b> 실제로 제출하시기 전에 아래 미리보기에서 값이 정확히 채워졌는지 꼭 확인해 주세요.</b>
       </div>
 
@@ -5906,9 +6119,54 @@ function DownloadDeleteReminderModal({ onClose }) {
   );
 }
 
-function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, showToast, workspaceCode, myDisplayName, isFounder, neisFillState, setNeisFillState }) {
+function DataBackupPanel({ students, records, criteria, settings, activeYear, onImportBackup, onHealthImported, showToast, workspaceCode, myDisplayName, isFounder, neisFillState, setNeisFillState }) {
   const [pendingImport, setPendingImport] = useState(null);
   const importInputRef = useRef(null);
+  const healthInputRef = useRef(null);
+  const healthCount = useMemo(() => countHealthRecords(workspaceCode), [workspaceCode, records]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 건강 기록(신장·체중·BMI·체지방률)은 이 기기에만 있으므로, 다른 학교 PC로 옮길 때 쓰는 파일.
+  // 학생 이름 없이 학생 id·종목·연도와 값만 담긴다(같은 학교 코드에서만 다시 불러올 수 있음).
+  function exportHealth() {
+    const payload = buildHealthExport(workspaceCode);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "paps-건강기록-" + (settings.schoolName || "data") + "-" + fileTimestamp() + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast("건강 기록 파일을 내려받았어요. 학교 업무용 PC에만 보관하세요.", "ok");
+  }
+
+  function handleHealthFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      let payload = null;
+      try { payload = JSON.parse(evt.target.result); } catch (err) { payload = null; }
+      if (payload && payload.kind !== HEALTH_FILE_KIND && Array.isArray(payload.students)) {
+        showToast("이 파일은 전체 백업(JSON) 파일이에요. 위의 \"JSON 백업 파일 불러오기\"를 써 주세요.", "warn");
+        return;
+      }
+      const result = importHealthFile(workspaceCode, payload);
+      if (!result.ok) {
+        showToast(result.reason === "other-code"
+          ? "다른 학교 코드에서 내보낸 건강 기록 파일이에요. 같은 코드로 들어와서 불러와 주세요."
+          : result.reason === "save-failed"
+          ? "이 기기에 저장하지 못했어요. 브라우저 저장 공간이나 시크릿 창 여부를 확인해 주세요."
+          : "올바른 건강 기록 파일이 아니에요.", "warn");
+        return;
+      }
+      showToast(`건강 기록을 불러왔어요(새로 ${result.added}건, 더 최신 값으로 ${result.updated}건).`, "ok");
+      if (onHealthImported) onHealthImported();
+    };
+    reader.readAsText(file);
+  }
   const [backupLog, setBackupLog] = useState(null);
   const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
 
@@ -5984,7 +6242,7 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
             <span className="backup-step-num">1</span>
             <div>
               <div className="backup-step-title">저장하기</div>
-              <div className="text-dim small-note">아래 버튼을 누르면 파일이 저장됩니다.</div>
+              <div className="text-dim small-note">아래 버튼을 누르면 파일이 저장됩니다. 신장·체중·BMI·체지방률은 이 기기에 있는 값만 들어가요.</div>
               <button className="btn btn-secondary" onClick={exportBackup}><Copy size={14} /> JSON으로 내보내기 (교사 보관용, 실명 포함)</button>
               {backupLog && (
                 backupLog.length === 0 ? (
@@ -6024,6 +6282,28 @@ function DataBackupPanel({ students, records, criteria, settings, activeYear, on
           <span>학생 이름·기록이 담긴 파일입니다. 개인 기기 등 안전한 곳에만 보관하고, 다 쓴 옛 파일은 삭제해 주세요.</span>
         </div>
         )}
+      </div>
+
+      <div className="panel">
+        <h3>건강 기록 파일 (이 기기 전용)</h3>
+        <div className="text-dim small-note">
+          신장·체중·BMI·체지방률은 건강에 관한 민감한 정보라서 서버(클라우드)에 올리지 않고
+          <b> 입력한 이 기기(브라우저)에만</b> 저장해요. 지금 이 기기에는 <b>{healthCount}건</b>이 있어요.
+          다른 학교 PC에서도 보려면 여기서 파일로 내보낸 뒤 그 PC에서 같은 코드로 들어와 불러오세요.
+          브라우저 데이터를 지우면 이 기기의 건강 기록도 사라지니, 파일로 한 번 받아 두세요.
+        </div>
+        <div className="backup-actions-row">
+          <button className="btn btn-secondary" onClick={exportHealth} disabled={healthCount === 0}><Copy size={14} /> 건강 기록 내보내기</button>
+          <input id="health-file-input" ref={healthInputRef} type="file" accept=".json,application/json" className="visually-hidden-input" onChange={handleHealthFile} />
+          <label htmlFor="health-file-input" className="btn btn-ghost file-label-btn">건강 기록 파일 불러오기</label>
+        </div>
+        <div className="warn-note">
+          <AlertTriangle size={16} />
+          <span>
+            이 파일은 학교 업무용 PC에만 두세요. 구글 드라이브 같은 클라우드나 메신저·이메일로 옮기지 말고,
+            USB 등으로 옮긴 뒤에는 바로 지워 주세요.
+          </span>
+        </div>
       </div>
 
       <NeisTemplateFiller students={students} records={records} activeYear={activeYear} showToast={showToast} fillState={neisFillState} setFillState={setNeisFillState} />
@@ -6181,6 +6461,7 @@ function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseo
         <ul className="closeout-checklist">
           <li><b>나이스(NEIS) 제출을 마쳤는지</b> 다시 한 번 확인해 주세요 — 데이터 백업 탭에서 나이스 양식에 기록을 반영하셨나요?</li>
           <li><b>이 작업은 되돌릴 수 없습니다.</b> 마감하면 기록·학생 명단뿐 아니라 <b>이 학교 코드 자체(설정, 접근권한, 변경 이력 등 전부)</b>가 삭제되고, 화면이 첫 화면으로 돌아갑니다.</li>
+          <li><b>건강 기록(신장·체중·BMI·체지방률)</b>은 서버가 아니라 입력한 기기에만 있어요. 이 기기의 건강 기록은 마감할 때 함께 지워지고, 다른 기기에 있던 건강 기록은 그 기기에서 프로그램을 다시 열어 "없는 코드"로 확인될 때 지워져요. 데이터 백업 탭에서 받아 둔 "건강 기록 파일"도 다 쓰면 지워 주세요.</li>
         </ul>
 
         <div className="closeout-backup-step">
@@ -7185,6 +7466,8 @@ function PapsStyles({ children }) {
         .icon-btn { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 6px; }
         .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
         .icon-btn.danger:hover { color: var(--track-red); }
+        .health-local-note { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 10px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--line-2); color: var(--text-dim); line-height: 1.55; }
+        .health-local-note svg { flex-shrink: 0; margin-top: 2px; color: var(--gold); }
         .bmi-bulk-toggle-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
 
         .paps-body { padding: 20px; }
@@ -7418,6 +7701,7 @@ function PapsStyles({ children }) {
           overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
         }
         .file-label-btn { user-select: none; }
+        .backup-actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 12px; }
 
         .table-wrap { overflow-x: auto; }
 
