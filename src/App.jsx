@@ -2623,6 +2623,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
             </>
           )}
 
+          <a className="gate-privacy" href="https://yangssaem.vercel.app/privacy/#paps" target="_blank" rel="noopener noreferrer">개인정보 안내 · 받는 정보와 지우는 법</a>
         </div>
         {manualOpen && <GuideModal onClose={() => setManualOpen(false)} onStartPractice={() => { setManualOpen(false); onStartPractice(); }} />}
       </div>
@@ -7407,6 +7408,7 @@ function PapsStyles({ children }) {
         .manual-btn:hover { background: rgba(255,201,60,0.22); }
         .gate-input { width: 100%; text-align: center; margin-bottom: 4px; }
         .gate-input-hint { font-size: 13px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
+        .gate-privacy { display: block; margin-top: 16px; text-align: center; font-size: 12.5px; color: var(--text-dim); text-decoration: underline; text-underline-offset: 3px; }
         .gate-note { display: flex; gap: 8px; text-align: left; font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-top: 14px; }
         .gate-link { background: none; border: none; color: var(--text-dim); font-size: 12px; text-decoration: underline; cursor: pointer; margin-top: 10px; }
         .gate-link:hover { color: var(--text); }
