@@ -2296,32 +2296,50 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 function IntroSplash({ onDone }) {
   const [fading, setFading] = useState(false);
   const title = "SMART PAPS";
+  const rootRef = useRef(null);
   const heroRef = useRef(null);
-  // PAPS 다섯 영역 배지: 양쌤 얼굴에서 부채꼴로 퍼져 나가요
-  const badges = [
-    { icon: "🏃", label: "심폐지구력", x: -132, y: -10 },
-    { icon: "🤸", label: "유연성", x: -98, y: -96 },
-    { icon: "💪", label: "근력·근지구력", x: 0, y: -134 },
-    { icon: "⚡", label: "순발력", x: 98, y: -96 },
-    { icon: "⚖️", label: "체지방", x: 132, y: -10 },
+  const chipRef = useRef(null);
+  const countRef = useRef(null);
+  const markRef = useRef(null);
+  const [graded, setGraded] = useState(false);
+  // 등급 막대: 왼쪽 5등급 → 오른쪽 1등급. 측정 횟수가 오르면 표시가 오른쪽으로 옮겨 가요.
+  const grades = [
+    { label: "5등급", color: "#E85D5D" },
+    { label: "4", color: "#FF9570" },
+    { label: "3", color: "#FFD54A" },
+    { label: "2", color: "#7FD98A" },
+    { label: "1", color: "#4E7D63" },
   ];
 
-  // 화면이 열리는 원의 중심을 얼굴 자리에 맞춰요
+  // 가운데 얼굴이 위쪽 "양쌤스튜디오" 배지 자리로 날아가도록 거리를 재요
   useLayoutEffect(() => {
-    const el = heroRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const root = el.closest(".intro-splash");
-    root.style.setProperty("--fx", `${r.left + r.width / 2}px`);
-    root.style.setProperty("--fy", `${r.top + r.height / 2}px`);
+    const root = rootRef.current, hero = heroRef.current, chip = chipRef.current;
+    if (!root || !hero || !chip) return;
+    const a = hero.getBoundingClientRect(), b = chip.getBoundingClientRect();
+    root.style.setProperty("--tx", `${b.left + b.width / 2 - (a.left + a.width / 2)}px`);
+    root.style.setProperty("--ty", `${b.top + b.height / 2 - (a.top + a.height / 2)}px`);
+    root.style.setProperty("--ts", (b.width / a.width).toFixed(3));
   }, []);
 
   useEffect(() => {
     let reduced = false;
     try { reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* 무시 */ }
     if (reduced) { onDone(); return; }
-    const holdTimer = setTimeout(() => setFading(true), 2900);
-    return () => clearTimeout(holdTimer);
+    // 왕복오래달리기 횟수가 0에서 58회까지 오르고, 등급 표시가 2등급 칸 가운데(70%)에 멈춰요
+    const TARGET = 58, END = 0.7;
+    let raf = 0;
+    const startTimer = setTimeout(() => {
+      const t0 = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - t0) / 1000), e = 1 - Math.pow(1 - t, 3);
+        if (countRef.current) countRef.current.textContent = Math.round(TARGET * e);
+        if (markRef.current) markRef.current.style.left = (e * END * 100) + "%";
+        if (t < 1) raf = requestAnimationFrame(step); else setGraded(true);
+      };
+      raf = requestAnimationFrame(step);
+    }, 1500);
+    const holdTimer = setTimeout(() => setFading(true), 3300);
+    return () => { clearTimeout(startTimer); clearTimeout(holdTimer); cancelAnimationFrame(raf); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2332,15 +2350,29 @@ function IntroSplash({ onDone }) {
   }, [fading, onDone]);
 
   return (
-    <div className={"intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)} role="img" aria-label="SMART PAPS 시작 화면">
+    <div ref={rootRef} className={"intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)} role="img" aria-label="SMART PAPS 시작 화면">
       <div className="intro-reveal" aria-hidden="true"><div className="intro-floor" /></div>
       <div className="intro-hero" ref={heroRef} aria-hidden="true">
         <span className="intro-ring" />
         <span className="intro-ring r2" />
-        {badges.map((b, i) => (
-          <span key={b.label} className="intro-badge" title={b.label} style={{ "--x": b.x + "px", "--y": b.y + "px", animationDelay: (0.55 + i * 0.08) + "s" }}>{b.icon}</span>
-        ))}
         <img src="/icons/yangssaem-face.webp" alt="" />
+      </div>
+      <div className="intro-chip">
+        <img ref={chipRef} src="/icons/yangssaem-face.webp" alt="" />
+        <span><b>양쌤스튜디오</b>가 만들었어요</span>
+      </div>
+      {/* 앱이 하는 일: 측정 → 등급 → 반 순위 */}
+      <div className={"intro-card" + (graded ? " is-graded" : "")} aria-hidden="true">
+        <div className="intro-card-head"><span>왕복오래달리기</span><em><i />측정 중</em></div>
+        <div className="intro-count"><b ref={countRef}>0</b><span>회</span></div>
+        <div className="intro-track">
+          {grades.map((g) => <i key={g.label} style={{ background: g.color }} />)}
+          <span className="intro-mark" ref={markRef} />
+        </div>
+        <div className="intro-grade-labels">
+          {grades.map((g, i) => <span key={g.label} className={i === 3 ? "on" : ""}>{g.label}</span>)}
+        </div>
+        <div className="intro-result"><span className="intro-pill p1">2등급</span><span className="intro-pill p2">반 1위</span></div>
       </div>
       <div className="intro-splash-title" aria-label={title}>
         {/* 글자를 단어 단위로 묶어서, 화면이 좁아도 "SMART PAP / S"처럼 단어 중간에서 줄이 바뀌지 않게 한다. */}
@@ -2349,7 +2381,7 @@ function IntroSplash({ onDone }) {
           return (
             <span key={w} className={"intro-word" + (w === 1 ? " intro-word-accent" : "")}>
               {word.split("").map((ch, i) => (
-                <span key={i} className="intro-letter" style={{ animationDelay: (0.85 + (start + i) * 0.045) + "s" }}>
+                <span key={i} className="intro-letter" style={{ animationDelay: (1.3 + (start + i) * 0.03) + "s" }}>
                   {ch}
                 </span>
               ))}
@@ -2357,7 +2389,7 @@ function IntroSplash({ onDone }) {
           );
         })}
       </div>
-      <div className="intro-splash-tagline" style={{ animationDelay: "1.4s" }}>
+      <div className="intro-splash-tagline" style={{ animationDelay: "1.5s" }}>
         측정부터 등급, 나이스 제출까지 <span className="intro-nowrap">— 한 번에</span>
       </div>
       <div className="intro-bar" aria-hidden="true"><i /></div>
@@ -7232,10 +7264,11 @@ function PapsStyles({ children }) {
         .paps-app * { box-sizing: border-box; }
 
         /* 시작 스플래시: 양쌤스튜디오 톤(따뜻한 종이색 + 남색 + 코트 주황). 화면 모드와 상관없이 같은 모습이에요.
-           양쌤 얼굴이 튀어나오고, 얼굴에서 물결과 함께 체육관이 열리며 PAPS 다섯 영역 배지가 퍼져 나가요. */
+           양쌤 얼굴이 튀어나와 위쪽 배지로 날아가고, 체육관이 열리며 왕복오래달리기 기록 → 등급 → 반 순위가 차례로 나와요. */
         .intro-splash {
+          --ease-out: cubic-bezier(0.23, 1, 0.32, 1); --ease-io: cubic-bezier(0.77, 0, 0.175, 1);
           position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column;
-          align-items: center; justify-content: center; gap: clamp(12px, 2.4vh, 20px); overflow: hidden;
+          align-items: center; justify-content: center; gap: clamp(10px, 2vh, 16px); overflow: hidden;
           cursor: pointer; opacity: 1; transition: opacity 0.6s ease; padding: 24px; text-align: center;
           background: #F8F3EA; color: #1D2747;
           font-family: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
@@ -7243,64 +7276,87 @@ function PapsStyles({ children }) {
         .intro-splash.intro-fading { opacity: 0; }
         .intro-reveal {
           position: absolute; inset: 0; pointer-events: none;
-          background: radial-gradient(circle at var(--fx, 50%) var(--fy, 40%), #FCE7CB 0, #F8F3EA 60%);
-          clip-path: circle(0 at var(--fx, 50%) var(--fy, 40%));
-          animation: introReveal 0.8s 0.45s cubic-bezier(0.6, 0, 0.3, 1) forwards;
+          background: radial-gradient(circle at 50% 46%, #FCE7CB 0, #F8F3EA 58%);
+          clip-path: circle(0 at 50% 50%);
+          animation: introReveal 0.8s 0.55s var(--ease-io) forwards;
         }
-        @keyframes introReveal { to { clip-path: circle(150vmax at var(--fx, 50%) var(--fy, 40%)); } }
+        @keyframes introReveal { to { clip-path: circle(150vmax at 50% 50%); } }
         .intro-floor { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; background: linear-gradient(180deg, #F0CF9F, #E6B577); box-shadow: inset 0 10px 0 rgba(255,255,255,0.35); }
         .intro-floor::before { content: ""; position: absolute; left: 0; right: 0; top: 34%; height: 4px; background: rgba(255,255,255,0.9); }
-        .intro-hero { position: relative; width: 124px; height: 124px; margin-top: 110px; z-index: 1; }
+        .intro-hero { position: absolute; left: 50%; top: 50%; width: 128px; height: 128px; margin: -64px 0 0 -64px; z-index: 3; pointer-events: none; }
         .intro-hero img {
           position: relative; z-index: 2; width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
           border: 5px solid #FFFDF8; box-shadow: 0 0 0 4px #E2622B, 0 18px 40px -14px rgba(29,39,71,0.45);
-          animation: introFacePop 0.55s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+          animation: introFacePop 0.4s var(--ease-out) both, introFaceGo 0.5s 0.95s var(--ease-io) forwards;
         }
-        @keyframes introFacePop { from { transform: scale(0); } to { transform: scale(1); } }
-        .intro-ring { position: absolute; inset: 0; border-radius: 50%; border: 3px solid #E2622B; opacity: 0; animation: introRing 1s 0.3s ease-out both; }
+        @keyframes introFacePop { from { transform: scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+        @keyframes introFaceGo { to { transform: translate(var(--tx, 0), var(--ty, -30vh)) scale(var(--ts, 0.23)); opacity: 0; } }
+        .intro-ring { position: absolute; inset: 0; border-radius: 50%; border: 3px solid #E2622B; opacity: 0; animation: introRing 1s 0.3s var(--ease-out) both; }
         .intro-ring.r2 { border-color: #F2B33D; animation-delay: 0.5s; }
-        @keyframes introRing { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(3.4); opacity: 0; } }
-        .intro-badge {
-          position: absolute; left: 50%; top: 50%; z-index: 1; width: 46px; height: 46px; margin: -23px 0 0 -23px;
-          border-radius: 50%; display: grid; place-items: center; font-size: 22px;
-          background: #FFFDF8; border: 1px solid #EAE0CF; box-shadow: 0 8px 18px -10px rgba(29,39,71,0.45);
-          opacity: 0; animation: introBadgeOut 0.6s cubic-bezier(0.2, 1.3, 0.4, 1) forwards;
+        @keyframes introRing { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(4.2); opacity: 0; } }
+        .intro-chip {
+          position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px 5px 5px; border-radius: 999px;
+          background: #FFFDF8; border: 1px solid #EAE0CF; color: #4B5373; font-size: 13px; box-shadow: 0 8px 20px -12px rgba(29,39,71,0.35);
+          opacity: 0; animation: introFadeUp 0.4s 1.2s var(--ease-out) forwards;
         }
-        @keyframes introBadgeOut { 0% { transform: scale(0.3); opacity: 0; } 100% { transform: translate(var(--x), var(--y)); opacity: 1; } }
+        .intro-chip img { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #E2622B; object-fit: cover; }
+        .intro-chip b { color: #1D2747; }
+        .intro-card {
+          position: relative; z-index: 1; width: min(80vw, 340px); padding: 16px 18px 18px; border-radius: 22px; text-align: left;
+          background: #FFFDF8; border: 1px solid #EAE0CF; box-shadow: 0 22px 50px -22px rgba(29,39,71,0.35);
+          opacity: 0; animation: introCardIn 0.45s 1.05s var(--ease-out) forwards;
+        }
+        @keyframes introCardIn { from { opacity: 0; transform: scale(0.95) translateY(12px); } to { opacity: 1; transform: none; } }
+        .intro-card-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 700; color: #1D2747; }
+        .intro-card-head em { font-style: normal; font-size: 12px; font-weight: 600; color: #E2622B; background: #FDEBDD; border-radius: 99px; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; }
+        .intro-card-head em i { width: 6px; height: 6px; border-radius: 50%; background: #E2622B; }
+        .intro-count { display: flex; align-items: baseline; gap: 4px; margin: 8px 0 12px; color: #1D2747; }
+        .intro-count b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 52px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; min-width: 2ch; }
+        .intro-count span { font-size: 16px; color: #4B5373; }
+        .intro-track { position: relative; height: 12px; display: flex; gap: 3px; }
+        .intro-track i { flex: 1; border-radius: 4px; }
+        .intro-mark { position: absolute; top: -7px; left: 0; width: 4px; height: 26px; margin-left: -2px; border-radius: 2px; background: #1D2747; box-shadow: 0 0 0 2px #FFFDF8; }
+        .intro-grade-labels { display: flex; gap: 3px; margin-top: 6px; font-size: 11px; color: #6B7088; }
+        .intro-grade-labels span { flex: 1; text-align: center; }
+        .intro-card.is-graded .intro-grade-labels .on { color: #1D2747; font-weight: 700; }
+        .intro-result { display: flex; gap: 8px; margin-top: 14px; min-height: 30px; }
+        .intro-pill { font-size: 14px; font-weight: 700; border-radius: 99px; padding: 5px 13px; opacity: 0; transform: scale(0.95) translateY(6px); transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out); }
+        .intro-pill.p1 { background: #7FD98A; color: #1D3B26; }
+        .intro-pill.p2 { background: #1D2747; color: #fff; transition-delay: 0.12s; }
+        .intro-card.is-graded .intro-pill { opacity: 1; transform: none; }
         .intro-splash-title {
           display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.26em; row-gap: 0.04em;
           font-family: 'Jua', 'IBM Plex Sans KR', sans-serif; line-height: 1.05;
-          font-size: clamp(38px, 10vw, 72px); font-weight: 400; letter-spacing: 0.02em;
-          color: #1D2747; position: relative; z-index: 1; max-width: 100%; margin-top: 6px;
+          font-size: clamp(36px, 9vw, 60px); font-weight: 400; letter-spacing: 0.02em;
+          color: #1D2747; position: relative; z-index: 1; max-width: 100%; margin-top: 10px;
         }
         .intro-word { display: inline-flex; white-space: nowrap; }
         .intro-word-accent { color: #E2622B; }
-        .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+        .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.4s var(--ease-out) forwards; }
         @keyframes introLetterDrop {
-          0% { opacity: 0; transform: translateY(-22px); }
+          0% { opacity: 0; transform: translateY(-14px); }
           100% { opacity: 1; transform: translateY(0); }
         }
         .intro-splash-tagline {
           font-size: clamp(14px, 3.8vw, 18px); color: #4B5373; opacity: 0; position: relative; z-index: 1;
           line-height: 1.5; word-break: keep-all; text-wrap: balance; max-width: 28em;
-          animation: introFadeUp 0.6s ease forwards;
+          animation: introFadeUp 0.45s var(--ease-out) forwards;
         }
         .intro-nowrap { white-space: nowrap; }
         @keyframes introFadeUp {
           0% { opacity: 0; transform: translateY(10px); }
           100% { opacity: 1; transform: translateY(0); }
         }
-        .intro-bar { position: relative; z-index: 1; width: 120px; height: 5px; border-radius: 5px; background: #EAE0CF; overflow: hidden; opacity: 0; animation: introFadeUp 0.4s 1.4s ease forwards; }
-        .intro-bar i { display: block; height: 100%; background: linear-gradient(100deg, #E2622B, #EE8A3A 55%, #F2B33D); transform-origin: left; animation: introLoad 2.6s 0.2s ease both; }
+        .intro-bar { position: relative; z-index: 1; width: 120px; height: 5px; border-radius: 5px; background: #EAE0CF; overflow: hidden; opacity: 0; animation: introFadeUp 0.4s 1.55s var(--ease-out) forwards; }
+        .intro-bar i { display: block; height: 100%; background: linear-gradient(100deg, #E2622B, #EE8A3A 55%, #F2B33D); transform-origin: left; animation: introLoad 3.1s 0.2s linear both; }
         @keyframes introLoad { from { transform: scaleX(0); } to { transform: scaleX(1); } }
         .intro-sign { position: absolute; left: 0; right: 0; bottom: max(20px, env(safe-area-inset-bottom)); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.18em; color: #4B5373; }
-        @media (max-height: 600px) { .intro-floor { display: none; } .intro-hero { margin-top: 80px; width: 96px; height: 96px; } }
+        @media (max-height: 600px) { .intro-floor { display: none; } .intro-count b { font-size: 40px; } .intro-count { margin: 4px 0 8px; } }
         @media (prefers-reduced-motion: reduce) {
           .intro-splash *, .intro-splash { animation: none !important; }
-          .intro-letter, .intro-splash-tagline, .intro-bar { opacity: 1 !important; transform: none !important; }
+          .intro-letter, .intro-splash-tagline, .intro-bar, .intro-chip, .intro-card { opacity: 1 !important; transform: none !important; }
           .intro-reveal { clip-path: none; }
-          .intro-badge { opacity: 1; transform: translate(var(--x), var(--y)); }
-          .intro-ring { display: none; }
+          .intro-hero, .intro-ring { display: none; }
         }
 
         .paps-loading {
