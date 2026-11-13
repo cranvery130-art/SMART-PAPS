@@ -6,14 +6,14 @@ import {
   CheckCircle2, XCircle, Info, Play,
   RotateCcw, Square, Smartphone, Copy,
   FileSpreadsheet, Check, ShieldCheck, Database, Award, Eye, EyeOff, Flag,
-  BookOpen, PlayCircle, LogOut
+  BookOpen, PlayCircle, LogOut, KeyRound, Download
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
   storage, PRACTICE_CODE, clearPracticeStore,
   currentUid, probeSchool, readMyMember, createSchool, founderLogin, requestAccessEntry,
   verifyViewer, changePasswords, listMembers, updateMember, deleteMember, transferFounderRole,
-  deleteSchoolAll, isValidCode,
+  deleteSchoolAll, isValidCode, issueRecoveryCode, recoverFounder,
 } from "./storage.js";
 import {
   PRACTICE_SCHOOL_NAME, PRACTICE_VIEWER_PASSWORD, PRACTICE_FOUNDER_PASSWORD,
@@ -964,7 +964,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   const lockEnabled = isPractice ? !!settings.viewerPassword : viewerOn;
   // 방금 "새 코드 만들기"로 만든 경우에만 코드·비밀번호 메모 창을 띄운다(비밀번호는 이때만 화면이 안다).
   const justCreatedRef = useRef(false);
-  const [createdPasswords, setCreatedPasswords] = useState({ viewer: "", founder: "" });
+  const [createdPasswords, setCreatedPasswords] = useState({ viewer: "", founder: "", recovery: "" });
 
   const prevTopRef = useRef({});
   const configVersionRef = useRef(0);
@@ -1231,7 +1231,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           if (cancelled) return;
           if (created) {
             justCreatedRef.current = true;
-            setCreatedPasswords({ viewer: viewerPw, founder: founderPw });
+            setCreatedPasswords({ viewer: viewerPw, founder: founderPw, recovery: created.recoveryCode || "" });
             setViewerOn(!!viewerPw);
             await saveWorkspaceCodeRemote(workspaceCode);
             setIsFounder(true);
@@ -1320,6 +1320,26 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   }
   async function clearPasswordAttempts(key) {
     try { await storage.delete(key, false); } catch (e) { /* 없어도 무방 */ }
+  }
+
+  // 개설자 전용 비밀번호를 잊었을 때: 복구 코드로 새 비밀번호를 정하고 개설자로 들어가요.
+  async function recoverWithCode({ code, recoveryCode, newPassword }) {
+    const sanitizedCode = sanitizeWorkspaceCode(code);
+    if (!sanitizedCode || sanitizedCode === PRACTICE_CODE) return { ok: false, reason: "bad-code" };
+    let result;
+    try {
+      result = await recoverFounder(sanitizedCode, recoveryCode, newPassword);
+    } catch (e) {
+      console.error("recover failed:", e);
+      return { ok: false, reason: "error" };
+    }
+    if (result.ok) {
+      appendAuditLog(sanitizedCode, { type: "access", ts: Date.now(), by: "개설자", message: "복구 코드로 개설자 전용 비밀번호를 새로 정함(복구 코드도 새로 바뀜)" }).catch(() => {});
+    }
+    return { ...result, code: sanitizedCode };
+  }
+  function enterAfterRecover(code) {
+    submitWorkspaceCode(code, "middle", "", "", "login");
   }
 
   async function requestAccess({ name, code, password, wantsEdit }) {
@@ -1474,6 +1494,18 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
       const what = [f ? "개설자 전용 비밀번호" : null, viewerOff ? "접근 신청(끔)" : (v ? "접근 신청 비밀번호" : null)].filter(Boolean).join("·");
       appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 ${what}을(를) 바꿈` });
       return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: "error" };
+    }
+  }
+
+  // 개설자: 복구 코드 새로 만들기. 결과: { ok, recoveryCode }
+  async function handleIssueRecovery() {
+    if (isPractice) return { ok: false, reason: "practice" };
+    try {
+      const recoveryCode = await issueRecoveryCode(workspaceCode);
+      appendAuditLog(workspaceCode, { type: "access", ts: Date.now(), by: myDisplayName, message: `${myDisplayName}님이 복구 코드를 새로 만듦(예전 복구 코드는 못 씀)` });
+      return { ok: true, recoveryCode };
     } catch (e) {
       return { ok: false, reason: "error" };
     }
@@ -2026,7 +2058,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     return (
       <PapsStyles>
         {showIntro && <IntroSplash onDone={() => setShowIntro(false)} />}
-        <WorkspaceGate onSubmit={submitWorkspaceCode} onRequestAccess={requestAccess} initialMode={gateInitialMode} onStartPractice={startPractice} />
+        <WorkspaceGate onSubmit={submitWorkspaceCode} onRequestAccess={requestAccess} onRecover={recoverWithCode} onEnterAfterRecover={enterAfterRecover} initialMode={gateInitialMode} onStartPractice={startPractice} />
       </PapsStyles>
     );
   }
@@ -2108,7 +2140,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
             workspaceCode={workspaceCode}
             viewerPassword={createdPasswords.viewer}
             founderPassword={createdPasswords.founder}
-            onClose={() => { setJustCreatedNotice(false); setCreatedPasswords({ viewer: "", founder: "" }); }}
+            recoveryCode={createdPasswords.recovery}
+            onClose={() => { setJustCreatedNotice(false); setCreatedPasswords({ viewer: "", founder: "", recovery: "" }); }}
           />
         )}
         {lockPromptOpen && (
@@ -2283,6 +2316,7 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
               lockEnabled={lockEnabled}
               isPractice={isPractice}
               onChangePasswords={handleChangePasswords}
+              onIssueRecovery={handleIssueRecovery}
               onOpenShare={() => setShareModalOpen(true)}
               isFounder={isFounder}
               workspaceCode={workspaceCode}
@@ -2414,9 +2448,15 @@ function IntroSplash({ onDone }) {
 
 /* ============================== 워크스페이스 코드 설정 ============================== */
 
-function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice }) {
+function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecover, initialMode, onStartPractice }) {
   const [value, setValue] = useState("");
-  const [mode, setMode] = useState(initialMode || "code"); // 'code' | 'notice' | 'form'
+  const [mode, setMode] = useState(initialMode || "code"); // 'code' | 'notice' | 'form' | 'recover'
+  const [recCode, setRecCode] = useState("");
+  const [recKey, setRecKey] = useState("");
+  const [recPw, setRecPw] = useState("");
+  const [recPw2, setRecPw2] = useState("");
+  const [recError, setRecError] = useState("");
+  const [recDone, setRecDone] = useState(null); // { code, recoveryCode }
   const [schoolLevel, setSchoolLevel] = useState("middle");
   const [initialPassword, setInitialPassword] = useState("");
   const [showInitialPassword, setShowInitialPassword] = useState(false);
@@ -2447,6 +2487,21 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
       else if (result.reason === "too-many-attempts") setFormError("비밀번호를 너무 여러 번 틀렸어요. 10분 뒤 다시 시도해 주세요.");
       else setFormError("신청을 처리하지 못했어요. 다시 시도해 주세요.");
     }
+  }
+
+  async function handleRecoverSubmit() {
+    if (!recCode.trim() || !recKey.trim() || !recPw.trim()) return;
+    if (recPw.trim().length < 6) { setRecError("새 개설자 전용 비밀번호는 6자 이상으로 정해 주세요."); return; }
+    if (recPw.trim() !== recPw2.trim()) { setRecError("새 비밀번호 두 칸이 서로 달라요."); return; }
+    setSubmitting(true);
+    setRecError("");
+    const r = await onRecover({ code: recCode, recoveryCode: recKey, newPassword: recPw.trim() });
+    setSubmitting(false);
+    if (r.ok) { setRecDone({ code: r.code, recoveryCode: r.recoveryCode }); setRecKey(""); setRecPw(""); setRecPw2(""); return; }
+    if (r.reason === "bad-code") setRecError("존재하지 않는 학교 코드예요. 다시 확인해 주세요.");
+    else if (r.reason === "legacy") setRecError("아직 새 보안 방식으로 옮기지 않은 예전 코드라 복구 코드가 없어요.");
+    else if (r.reason === "bad-recovery") setRecError("복구 코드가 맞지 않아요. 이 코드에 복구 코드를 만든 적이 없을 수도 있어요. 연달아 시도했다면 5초 뒤에 다시 해 주세요.");
+    else setRecError("처리하지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요.");
   }
 
   const [createError, setCreateError] = useState("");
@@ -2575,7 +2630,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
                     <b>접근 신청 비밀번호:</b> 동료 선생님께 알려 줘요. 화면 잠금을 풀 때도 써요. 비우면 신청과 화면 잠금이 꺼져요.
                   </div>
                   <div className="text-dim small-note gate-pw-hint">
-                    <b>보관:</b> 두 비밀번호는 되돌릴 수 없게 저장돼서 아무도 다시 볼 수 없어요. 만든 뒤 나오는 메모 파일을 꼭 받아 두세요.
+                    <b>보관:</b> 두 비밀번호는 되돌릴 수 없게 저장돼서 아무도 다시 볼 수 없어요. 만든 뒤 나오는 메모 파일(복구 코드 포함)을 꼭 받아 두세요. 개설자 전용 비밀번호를 잊으면 복구 코드로 새로 정해요.
                   </div>
                   <div className="text-dim small-note">
                     <Info size={13} /> 이미 있는 코드를 적으면 새로 만들지 않고, 개설자 전용 비밀번호가 맞을 때만 개설자로 들어가요.
@@ -2621,6 +2676,9 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
               <button className="btn btn-primary big-btn" disabled={!value.trim() || !founderPassword.trim()} onClick={submitCode}>
                 로그인
               </button>
+              <button className="gate-link-btn gate-forgot" onClick={() => { setRecCode(value); setRecError(""); setRecDone(null); setMode("recover"); }}>
+                개설자 전용 비밀번호를 잊었어요
+              </button>
 
               <div className="gate-divider" />
 
@@ -2661,6 +2719,44 @@ function WorkspaceGate({ onSubmit, onRequestAccess, initialMode, onStartPractice
           <div className="gate-btn-row">
             <button className="btn btn-ghost" onClick={() => setMode("code")}>돌아가기</button>
             <button className="btn btn-primary" disabled={!agree} onClick={() => setMode("form")}>다음</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "recover") {
+    if (recDone) {
+      return (
+        <div className="paps-app gate-screen">
+          <div className="gate-card">
+            <CheckCircle2 size={32} color="var(--gold)" />
+            <h2>새 비밀번호를 정했어요</h2>
+            <RecoveryCodeBox workspaceCode={recDone.code} recoveryCode={recDone.recoveryCode} fresh />
+            <button className="btn btn-primary big-btn" onClick={() => onEnterAfterRecover(recDone.code)}>개설자로 들어가기</button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="paps-app gate-screen">
+        <div className="gate-card">
+          <KeyRound size={32} color="var(--gold)" />
+          <h2>비밀번호 다시 정하기</h2>
+          <p className="gate-desc">
+            지금 비밀번호는 아무도 볼 수 없어요. 코드를 만들 때 받은 <b>복구 코드</b>를 넣으면 새 개설자 전용 비밀번호를 정할 수 있어요.
+          </p>
+          <input className="input big-input gate-input" placeholder="학교 코드" value={recCode} onChange={e => setRecCode(e.target.value)} />
+          <input className="input big-input gate-input recovery-input" placeholder="복구 코드 12자리" value={recKey} onChange={e => setRecKey(e.target.value)} autoComplete="off" spellCheck={false} />
+          <input className="input big-input gate-input" type="password" placeholder="새 비밀번호 (6자 이상)" value={recPw} onChange={e => setRecPw(e.target.value)} />
+          <input className="input big-input gate-input" type="password" placeholder="새 비밀번호 한 번 더" value={recPw2} onChange={e => setRecPw2(e.target.value)} onKeyDown={e => { if (e.key === "Enter") handleRecoverSubmit(); }} />
+          {recError && <div className="gate-error">{recError}</div>}
+          <div className="text-dim small-note">복구 코드도 잃어버렸다면 되찾을 수 없어요. 그때는 새 코드를 만들어 주세요.</div>
+          <div className="gate-btn-row">
+            <button className="btn btn-ghost" onClick={() => setMode("code")}>돌아가기</button>
+            <button className="btn btn-primary" disabled={!recCode.trim() || !recKey.trim() || !recPw.trim() || !recPw2.trim() || submitting} onClick={handleRecoverSubmit}>
+              {submitting ? "확인 중..." : "새 비밀번호 정하기"}
+            </button>
           </div>
         </div>
       </div>
@@ -2840,7 +2936,17 @@ function BlockedScreen({ reason, onRetry }) {
 
 /* ============================== 접근 요청 관리(관리자) ============================== */
 
-function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestore, onDeleteEntry, onTransferFounder, onUndoRecord, lockEnabled, isPractice, onChangePasswords, onOpenShare, isFounder, workspaceCode, showToast }) {
+function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestore, onDeleteEntry, onTransferFounder, onUndoRecord, lockEnabled, isPractice, onChangePasswords, onIssueRecovery, onOpenShare, isFounder, workspaceCode, showToast }) {
+  const [issuedRecovery, setIssuedRecovery] = useState("");
+  const [issuing, setIssuing] = useState(false);
+  async function issueRecovery() {
+    setIssuing(true);
+    const r = await onIssueRecovery();
+    setIssuing(false);
+    if (r.ok) setIssuedRecovery(r.recoveryCode);
+    else if (r.reason === "practice") showToast("연습모드에서는 복구 코드를 만들지 않아요.", "warn");
+    else showToast("복구 코드를 만들지 못했어요. 다시 시도해 주세요.", "warn");
+  }
   const [showPw, setShowPw] = useState(false);
   const [showFounderPw, setShowFounderPw] = useState(false);
   const [viewerPwDraft, setViewerPwDraft] = useState("");
@@ -2969,6 +3075,24 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           <button className="btn btn-primary" onClick={savePasswords} disabled={savingPw}>
             {savingPw ? "저장 중..." : "비밀번호 바꾸기"}
           </button>
+        )}
+
+        {isFounder && !isPractice && (
+          <>
+            <div className="divider" />
+            <h3>복구 코드</h3>
+            <div className="text-dim small-note">
+              개설자 전용 비밀번호를 잊었을 때, 첫 화면 "개설자 전용 비밀번호를 잊었어요"에서 복구 코드를
+              넣으면 새 비밀번호를 정할 수 있어요. 예전에 만든 코드라 복구 코드를 받은 적이 없거나 잃어버렸다면
+              여기서 새로 만들어 두세요. 새로 만들면 예전 복구 코드는 못 써요.
+            </div>
+            <button className="btn btn-ghost" onClick={issueRecovery} disabled={issuing}>
+              <KeyRound size={14} /> {issuing ? "만드는 중..." : "복구 코드 만들기"}
+            </button>
+          </>
+        )}
+        {issuedRecovery && (
+          <RecoveryCodeModal workspaceCode={workspaceCode} recoveryCode={issuedRecovery} onClose={() => setIssuedRecovery("")} />
         )}
 
         <div className="divider" />
@@ -3275,7 +3399,68 @@ function IdleLockScreen({ onUnlock, error }) {
   );
 }
 
-function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword, onClose }) {
+// 복구 코드 메모 파일
+function downloadRecoveryMemo(workspaceCode, recoveryCode) {
+  const lines = [
+    "SMART PAPS 복구 코드 메모",
+    "",
+    "학교 코드: " + workspaceCode,
+    "복구 코드: " + recoveryCode,
+    "",
+    "개설자 전용 비밀번호를 잊었을 때 첫 화면 '개설자 전용 비밀번호를 잊었어요'에서 이 복구 코드를 넣으면 새 비밀번호를 정할 수 있어요.",
+    "한 번 쓰면 새 복구 코드로 바뀌어요. 동료 선생님께 알려 주지 마세요.",
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "smart-paps-" + workspaceCode + "-복구코드.txt";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// 복구 코드를 한 번만 보여주는 칸(복사·메모 파일 받기)
+function RecoveryCodeBox({ workspaceCode, recoveryCode, fresh }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try { await navigator.clipboard.writeText(recoveryCode); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) { /* 직접 적기 */ }
+  }
+  return (
+    <div className="recovery-box">
+      <div className="text-dim small-note">
+        {fresh ? "쓴 복구 코드는 이제 못 써요. 아래 새 복구 코드를 적어 두세요." : "개설자 전용 비밀번호를 잊었을 때 이 복구 코드로 새 비밀번호를 정해요."}
+        {" "}이 창을 닫으면 다시 볼 수 없어요.
+      </div>
+      <div className="recovery-code" aria-label="복구 코드">{recoveryCode}</div>
+      <div className="gate-btn-row">
+        <button className="btn btn-ghost" onClick={copy}><Copy size={14} /> {copied ? "복사했어요" : "복사"}</button>
+        <button className="btn btn-ghost" onClick={() => downloadRecoveryMemo(workspaceCode, recoveryCode)}><Download size={14} /> 메모 파일 받기</button>
+      </div>
+    </div>
+  );
+}
+
+function RecoveryCodeModal({ workspaceCode, recoveryCode, onClose }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><KeyRound size={18} color="var(--gold)" /> 새 복구 코드</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <RecoveryCodeBox workspaceCode={workspaceCode} recoveryCode={recoveryCode} />
+          <div className="text-dim small-note">예전 복구 코드는 이제 못 써요.</div>
+          <button className="btn btn-primary big-btn" onClick={onClose}>적어 뒀어요</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword, recoveryCode, onClose }) {
   function downloadMemo() {
     const lines = [
       "SMART PAPS 학교 코드 메모",
@@ -3283,9 +3468,11 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
       "학교 코드: " + workspaceCode,
       "접근 신청 비밀번호(동료 교사용): " + (viewerPassword || "(설정 안 함)"),
       "개설자 전용 비밀번호(본인만): " + (founderPassword || "(설정 안 함)"),
+      "복구 코드(본인만): " + (recoveryCode || "(없음)"),
       "",
       "비밀번호는 서버에 암호(해시)로만 저장되어 프로그램에서도 다시 보여줄 수 없어요.",
-      "이 파일을 잃어버리면 비밀번호를 되찾을 방법이 없어요. 안전한 곳에 보관하세요.",
+      "개설자 전용 비밀번호를 잊으면 첫 화면 '개설자 전용 비밀번호를 잊었어요'에서 복구 코드로 새 비밀번호를 정해요.",
+      "복구 코드까지 잃어버리면 되찾을 방법이 없어요. 이 파일을 안전한 곳에 보관하세요.",
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
@@ -3306,14 +3493,15 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
         </div>
         <div className="modal-body">
           <div className="text-dim small-note">
-            이 코드와 비밀번호는 <b>이메일이나 계정이 없어 잊어버리면 되찾을 방법이 없어요.</b>
-            비밀번호는 서버에 되돌릴 수 없는 암호(해시)로만 저장돼서, 이 창을 닫으면 프로그램에서도
-            다시 보여줄 수 없어요. 아래 버튼으로 메모 파일을 받아 안전한 곳에 꼭 저장해 두세요.
+            비밀번호와 복구 코드는 서버에 되돌릴 수 없는 암호(해시)로만 저장돼서, 이 창을 닫으면
+            다시 보여줄 수 없어요. 개설자 전용 비밀번호를 잊으면 <b>복구 코드</b>로 새로 정할 수 있어요.
+            아래 버튼으로 메모 파일을 받아 안전한 곳에 꼭 저장해 두세요.
           </div>
           <div className="closeout-summary">
             학교 코드: <b>{workspaceCode}</b><br />
             접근 신청 비밀번호: <b>{viewerPassword || "설정 안 함(접근 신청 꺼짐)"}</b><br />
             개설자 전용 비밀번호: <b>{founderPassword || "설정 안 함"}</b>
+            {recoveryCode && <><br />복구 코드: <b className="recovery-inline">{recoveryCode}</b></>}
           </div>
           <button className="btn btn-primary big-btn" onClick={downloadMemo}>
             <Copy size={14} /> 메모 파일 다운로드
@@ -7446,6 +7634,17 @@ function PapsStyles({ children }) {
         .gate-agree input { margin-top: 2px; width: 16px; height: 16px; accent-color: var(--track-red); flex-shrink: 0; }
         .gate-btn-row { display: flex; gap: 10px; width: 100%; justify-content: center; }
         .gate-error { color: #E85D5D; font-size: 12px; margin: -6px 0 12px; text-align: center; }
+        /* 복구 코드: 개설자 전용 비밀번호를 잊었을 때 쓰는 12자리 코드 */
+        .gate-forgot { margin-top: 0; padding: 6px; background: none; border: none; font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
+        .gate-forgot:hover { background: none; color: var(--text); }
+        .recovery-input { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+        .recovery-box { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 14px; text-align: left; }
+        .recovery-code {
+          font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 22px; font-weight: 700; letter-spacing: 0.1em;
+          text-align: center; padding: 12px 8px; border-radius: 10px; color: var(--gold);
+          background: var(--surface-2); border: 1px dashed var(--gold); user-select: all; word-break: break-all;
+        }
+        .recovery-inline { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.06em; color: var(--gold); }
 
         .viewer-badge { cursor: default; }
         .tab-badge {

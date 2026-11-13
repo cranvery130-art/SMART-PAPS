@@ -188,6 +188,24 @@ export function hashPassword(code, kind, pw) {
   return sha256Hex("smart-paps-v1|" + code + "|" + kind + "|" + String(pw || "").trim());
 }
 
+// 복구 코드: 개설자 전용 비밀번호를 잊었을 때 새 비밀번호를 정하는 12자리 코드(헷갈리는 0·O·1·I·L 뺌).
+// 서버에는 해시만 저장해요. 보여줄 때는 4자리씩 끊어요(예: K7QM-3XRA-9PTB).
+const RECOVERY_ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export function makeRecoveryCode() {
+  const out = [];
+  const buf = new Uint32Array(12);
+  crypto.getRandomValues(buf);
+  for (const n of buf) out.push(RECOVERY_ABC[n % RECOVERY_ABC.length]);
+  const s = out.join("");
+  return s.slice(0, 4) + "-" + s.slice(4, 8) + "-" + s.slice(8, 12);
+}
+export function normalizeRecoveryCode(text) {
+  return String(text || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+function hashRecovery(code, rc) {
+  return hashPassword(code, "recovery", normalizeRecoveryCode(rc));
+}
+
 export async function currentUid() {
   const user = await ensureSignedIn();
   return user.uid;
@@ -246,21 +264,22 @@ function founderEntry() {
   return { type: "founder", status: "approved", name: "개설자", submittedAt: Date.now() };
 }
 
-// 새 코드 만들기. 이미 있는 코드면 false.
+// 새 코드 만들기. 성공하면 { recoveryCode }(이때 한 번만 보여줘요), 이미 있는 코드면 false.
 export async function createSchool(code, viewerPassword, founderPassword) {
   if (!isValidCode(code) || !String(founderPassword || "").trim()) return false;
+  const recoveryCode = makeRecoveryCode();
   const uid = await currentUid();
   const founderHash = await hashPassword(code, "founder", founderPassword);
   const viewerOn = !!String(viewerPassword || "").trim();
   const viewerHash = viewerOn ? await hashPassword(code, "viewer", viewerPassword) : "";
   const batch = writeBatch(db);
-  batch.set(secretRef(code), { founder: founderHash, viewer: viewerHash });
+  batch.set(secretRef(code), { founder: founderHash, viewer: viewerHash, recovery: await hashRecovery(code, recoveryCode) });
   batch.set(infoRef(code), { createdAt: Date.now(), v: 2, viewerOn });
   batch.set(claimRef(code, uid), { h: founderHash, at: serverTimestamp() });
   batch.set(memberRef(code, uid), founderEntry());
   try {
     await batch.commit();
-    return true;
+    return { recoveryCode };
   } catch (e) {
     if (isDenied(e)) return false;
     throw e;
@@ -387,6 +406,33 @@ export async function changePasswords(code, { viewerPassword, founderPassword, v
   await batch.commit();
   const info = await getDoc(infoRef(code));
   return { changed: true, viewerOn: info.exists() ? !!info.data().viewerOn : false };
+}
+
+// 개설자: 복구 코드 새로 만들기(예전 복구 코드는 바로 못 써요). 돌려주는 값: 새 복구 코드(한 번만 보여줘요)
+export async function issueRecoveryCode(code) {
+  const recoveryCode = makeRecoveryCode();
+  await updateDoc(secretRef(code), { recovery: await hashRecovery(code, recoveryCode) });
+  return recoveryCode;
+}
+
+// 개설자 전용 비밀번호를 잊었을 때: 복구 코드가 맞으면 새 비밀번호를 정하고 이 기기를 개설자로 들여보내요.
+// 쓴 복구 코드는 바로 새것으로 바뀌어요(조회 비밀번호는 그대로).
+// 결과: { ok: true, recoveryCode } | { ok: false, reason: "bad-code" | "legacy" | "bad-recovery" }
+export async function recoverFounder(code, recoveryCode, newFounderPassword) {
+  const { state } = await probeSchool(code);
+  if (state === "none") return { ok: false, reason: "bad-code" };
+  if (state === "legacy") return { ok: false, reason: "legacy" };
+  const nextCode = makeRecoveryCode();
+  const h = await hashRecovery(code, recoveryCode);
+  const founderHash = await hashPassword(code, "founder", newFounderPassword);
+  const nextHash = await hashRecovery(code, nextCode);
+  const ok = await submitClaimThen(code, { h }, async (uid) => {
+    const batch = writeBatch(db);
+    batch.update(secretRef(code), { founder: founderHash, recovery: nextHash });
+    batch.set(memberRef(code, uid), founderEntry());
+    await batch.commit();
+  });
+  return ok ? { ok: true, recoveryCode: nextCode } : { ok: false, reason: "bad-recovery" };
 }
 
 // 구성원 목록(개설자·승인된 수정 권한자만 읽을 수 있음)

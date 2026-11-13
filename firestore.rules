@@ -11,6 +11,10 @@ rules_version = '2';
 //    비교해 members/{uid}(구성원 문서)를 만들게 한다. 그래서 코드를 알아도 비밀번호를 알아낼 수
 //    없고, 개설자·수정 권한자·조회자 구분을 서버가 직접 지킨다. 틀린 비밀번호는 5초에 한 번만
 //    다시 시도할 수 있다.
+//  - 복구 코드(2026-11): 개설자 전용 비밀번호를 잊었을 때 쓰는 12자리 코드. 이것도 해시만
+//    meta/secret의 recovery에 둔다. 복구 코드 해시를 claims/{uid}에 내면, 같은 묶음으로 새 개설자
+//    비밀번호와 "새" 복구 코드를 정하고 개설자 구성원 문서를 만들 수 있다(한 번 쓴 복구 코드는 바로
+//    바뀐다). 조회 비밀번호는 이때 바꿀 수 없다.
 //  - 학생 명단·등급 기준·설정(data/config)과 측정 기록(data/records)은 승인된 구성원만 읽고,
 //    개설자·승인된 수정 권한자만 쓴다. 변경 이력·백업 이력은 개설자·수정 권한자만 읽고 쓴다.
 //  - 예전 방식(kv/paps:config:{코드} 문서 안에 비밀번호 원문이 있던 코드)은 개설자가 새 버전에서
@@ -88,6 +92,20 @@ service cloud.firestore {
             && myClaim(code).legacy == legacyFounderPassword(code))
       );
     }
+    // 복구 코드: 이 요청 직전의 secret.recovery와 내가 낸 해시가 같은지(아직 복구 코드가 없으면 거절)
+    function recoveryOk(code) {
+      return hasClaim(code)
+        && exists(secretPath(code))
+        && get(secretPath(code)).data.get('recovery', '') != ''
+        && myClaim(code).h == get(secretPath(code)).data.recovery;
+    }
+    // 복구 코드를 쓴 묶음: 복구 코드가 새것으로 바뀌고, 조회 비밀번호는 그대로
+    function recoveryRotated(code) {
+      return recoveryOk(code)
+        && existsAfter(secretPath(code))
+        && getAfter(secretPath(code)).data.get('recovery', '') != get(secretPath(code)).data.recovery
+        && getAfter(secretPath(code)).data.viewer == get(secretPath(code)).data.viewer;
+    }
     function viewerOk(code) {
       return hasClaim(code)
         && existsAfter(secretPath(code))
@@ -102,7 +120,7 @@ service cloud.firestore {
     // 내가 내 구성원 문서를 만들거나 바꿀 때 허용되는 모양
     function selfEntryOk(code, d) {
       return entryKeysOk(d) && (
-        (d.type == 'founder' && d.status == 'approved' && founderOk(code))
+        (d.type == 'founder' && d.status == 'approved' && (founderOk(code) || recoveryRotated(code)))
         || (d.type == 'viewer' && d.status == 'approved' && viewerOk(code))
         || (d.type == 'editor' && d.status == 'pending' && viewerOk(code))
       );
@@ -114,9 +132,11 @@ service cloud.firestore {
         && d.status in ['approved', 'pending', 'denied'];
     }
     function secretShapeOk(d) {
-      return d.keys().hasOnly(['founder', 'viewer'])
+      return d.keys().hasOnly(['founder', 'viewer', 'recovery'])
         && d.founder is string && d.founder.size() == 64
-        && d.viewer is string && (d.viewer == '' || d.viewer.size() == 64);
+        && d.viewer is string && (d.viewer == '' || d.viewer.size() == 64)
+        && d.get('recovery', '') is string
+        && (d.get('recovery', '') == '' || d.get('recovery', '').size() == 64);
     }
     function infoShapeOk(code, d) {
       return d.keys().hasOnly(['createdAt', 'v', 'viewerOn'])
@@ -146,7 +166,9 @@ service cloud.firestore {
         && secretShapeOk(request.resource.data)
         && existsAfter(infoPath(code))
         && (brandNew(code) || isFounder(code));
-      allow update: if isFounder(code) && secretShapeOk(request.resource.data);
+      // 개설자, 또는 복구 코드가 맞는 기기(새 복구 코드로 바꾸는 경우만)
+      allow update: if secretShapeOk(request.resource.data)
+        && (isFounder(code) || recoveryRotated(code));
       allow delete: if isFounder(code);
     }
 
