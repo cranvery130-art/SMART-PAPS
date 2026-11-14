@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- 아이폰·아이패드: 글 칸을 눌러도 화면이 저절로 확대되지 않게(두 손가락 확대는 그대로), 빠르게 두 번 눌러도 확대되지 않게, 빈 곳을 눌러도 메뉴가 닫히게 -->
+<script>(function(){try{var u=navigator.userAgent,ios=/iP(hone|ad|od)/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1);if(!ios)return;document.documentElement.classList.add("ios");var m=document.querySelector('meta[name="viewport"]');if(m&&!/maximum-scale/.test(m.content))m.setAttribute("content",m.content+",maximum-scale=1");}catch(e){}})();</script>
+<style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}@supports (-webkit-touch-callout:none){body *{cursor:pointer}body input,body textarea,body select,body [contenteditable]{cursor:auto}}</style>
     <title>SMART PAPS</title>
     <meta name="description" content="중학교 체육수업용 PAPS(팝스) 실시간 기록·랭킹 관리 프로그램" />
     <meta name="theme-color" content="#EFE7D6" />
