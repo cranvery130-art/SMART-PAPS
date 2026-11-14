@@ -7456,7 +7456,7 @@ function PapsStyles({ children }) {
           font-size: 15px;
           background: radial-gradient(ellipse at top, #15171c 0%, var(--bg) 62%);
           color: var(--text);
-          min-height: 100vh;
+          min-height:100vh;min-height:100svh;
           width: 100%;
           box-sizing: border-box;
         }
@@ -7566,7 +7566,7 @@ function PapsStyles({ children }) {
         .spin-slow { animation: spin 2.5s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .gate-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+        .gate-screen { display: flex; align-items: center; justify-content: center; min-height:100vh;min-height:100svh; padding: 20px; }
         .gate-card {
           max-width: 420px; width: 100%; background: var(--panel); border: 1px solid var(--line);
           border-top: 2px solid var(--gold);
@@ -7967,7 +7967,7 @@ function PapsStyles({ children }) {
           position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
           overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
         }
-        .file-label-btn { user-select: none; }
+        .file-label-btn { -webkit-user-select:none;user-select:none; }
         .backup-actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 12px; }
 
         .table-wrap { overflow-x: auto; }
