@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+import { useBackLayer, useTabBack, startBackGuard } from "./backGuard.js";
 import { createPortal } from "react-dom";
 import {
   Trophy, Medal, RefreshCw, Plus, Trash2, Users,
@@ -965,6 +966,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
   // 방금 "새 코드 만들기"로 만든 경우에만 코드·비밀번호 메모 창을 띄운다(비밀번호는 이때만 화면이 안다).
   const justCreatedRef = useRef(false);
   const [createdPasswords, setCreatedPasswords] = useState({ viewer: "", founder: "", recovery: "" });
+
+  // 휴대폰 뒤로가기: 열린 창 닫기 → 바로 전 탭 → 첫 화면에서는 '한 번 더 누르면 나가요' (backGuard.js)
+  useEffect(() => { startBackGuard(); }, []);
+  useTabBack(view, setView);
+  useBackLayer(presentation, () => { requestExitPresentation(); return true; }); // 잠겨 있으면 비밀번호 창이 떠요
+  useBackLayer(idleLocked, () => true); // 자리 비움 잠금 중에는 뒤로가기로 나가지 않아요
+  useBackLayer(shareModalOpen, () => { setShareModalOpen(false); return true; });
+  useBackLayer(lockPromptOpen, () => { setLockPromptOpen(false); return true; });
+  useBackLayer(justCreatedNotice, () => true); // 코드·비밀번호 메모 창은 확인을 눌러야 닫혀요
+  useBackLayer(showIntro, () => { setShowIntro(false); return true; });
 
   const prevTopRef = useRef({});
   const configVersionRef = useRef(0);
@@ -2470,6 +2481,8 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
   const [reqPassword, setReqPassword] = useState("");
   const [wantsEdit, setWantsEdit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 휴대폰 뒤로가기: 참여 신청·비밀번호 다시 정하기 화면에서 한 단계 전으로
+  useBackLayer(mode !== "code", () => { setMode(mode === "form" ? "notice" : "code"); return true; });
   const [formError, setFormError] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
 
@@ -5775,6 +5788,7 @@ function RosterManager({ students, setStudents, showToast, schoolGrades }) {
   const [dragOver, setDragOver] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  useBackLayer(confirmDeleteOpen, () => { setConfirmDeleteOpen(false); return true; });
   const [lastBulkAddedIds, setLastBulkAddedIds] = useState(null);
   // 엑셀 파일을 연달아 여러 번 드래그하면, 앞선 파일을 아직 읽는 중(비동기)일 때 뒤이은
   // 드래그가 시작될 수 있다. 이때 각각의 처리 함수가 자신이 호출된 시점의(어쩌면 오래된)
@@ -6614,6 +6628,7 @@ const CLOSEOUT_NEIS_EXPORT_COLUMNS = [
 
 function SemesterCloseoutPanel({ students, records, criteria, settings, onCloseout, workspaceCode, activeYear }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  useBackLayer(confirmOpen, () => { setConfirmOpen(false); return true; });
   const [backedUp, setBackedUp] = useState(false);
   const [showDeleteReminder, setShowDeleteReminder] = useState(false); // 다운로드 직후 파기 안내 팝업
 
