@@ -1020,6 +1020,16 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
     }
   }
 
+  // 연습모드에는 실제 학생 정보가 없으니, 비밀번호를 몰라도 전광판 창을 바로 나갈 수 있게 한다.
+  // (실제 학교 코드는 이 길이 없고 반드시 비밀번호로 풀어야 한다.)
+  function exitPresentationForPractice() {
+    if (!isPractice) return;
+    setPresentationUnlocked(true);
+    setLockPromptOpen(false);
+    setLockPromptError("");
+    setPresentation(false);
+  }
+
   // 공용 PC(체육관·교무실 공용 컴퓨터 등)에 로그인된 채로 방치되어 다른 사람이 학생
   // 개인정보에 접근하는 것을 막기 위한 자동 잠금. 로그인(코드 확인)이 끝난 뒤부터, 화면
   // 조작(마우스·키보드·터치·스크롤)이 일정 시간(12분) 없으면 자동으로 잠긴다. 전광판
@@ -2159,6 +2169,8 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
           <BoardLockPrompt
             error={lockPromptError}
             onUnlock={handleUnlockAttempt}
+            practicePassword={isPractice ? settings.viewerPassword : ""}
+            onPracticeExit={isPractice ? exitPresentationForPractice : null}
             onCancel={() => { setLockPromptOpen(false); setLockPromptError(""); }}
           />
         )}
@@ -3117,6 +3129,7 @@ function AccessRequestsPanel({ accessList, onApprove, onDeny, onRevoke, onRestor
           함부로 다른 화면을 열 수 없어요.
           <b> 원래 창은 잠기지 않아 계속 작업할 수 있고, 동료 선생님 화면에도 영향을 주지 않아요.</b>
           {!lockEnabled && " 지금은 접근 신청 비밀번호가 없어서 잠기지 않고 바로 나가져요."}
+          {isPractice && " 연습모드에서는 비밀번호를 몰라도 \"연습이라 바로 나가기\"로 나갈 수 있어요(실제 학교 코드에는 이 버튼이 없어요)."}
         </div>
       </div>
 
@@ -3343,7 +3356,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
 
 /* ============================== 모바일 공유 안내 ============================== */
 
-function BoardLockPrompt({ onUnlock, onCancel, error }) {
+function BoardLockPrompt({ onUnlock, onCancel, error, practicePassword = "", onPracticeExit = null }) {
   const [pw, setPw] = useState("");
   return (
     <div className="modal-backdrop" onClick={onCancel}>
@@ -3354,8 +3367,16 @@ function BoardLockPrompt({ onUnlock, onCancel, error }) {
         </div>
         <div className="modal-body">
           <div className="text-dim small-note">전광판 화면을 나가려면 접근 신청 비밀번호를 입력해 주세요.</div>
+          {onPracticeExit && (
+            <div className="info-banner practice-lock-hint">
+              <span>
+                <b>연습모드</b>라 직접 정한 비밀번호가 없어요.
+                {practicePassword ? <> 잠금을 체험해 보려면 연습용 비밀번호 <b>{practicePassword}</b>를 넣고, 아니면 아래 "연습이라 바로 나가기"를 눌러요.</> : <> 아래 "연습이라 바로 나가기"를 눌러요.</>}
+              </span>
+            </div>
+          )}
           <input
-            className="input"
+            className="input lock-pw-input"
             type="password"
             value={pw}
             onChange={e => setPw(e.target.value)}
@@ -3365,6 +3386,9 @@ function BoardLockPrompt({ onUnlock, onCancel, error }) {
           />
           {error && <div className="gate-error">{error}</div>}
           <div className="confirm-actions">
+            {onPracticeExit && (
+              <button className="btn btn-secondary" onClick={onPracticeExit}>연습이라 바로 나가기</button>
+            )}
             <button className="btn btn-ghost" onClick={onCancel}>취소</button>
             <button className="btn btn-primary" onClick={() => onUnlock(pw)}>확인</button>
           </div>
@@ -3394,7 +3418,7 @@ function IdleLockScreen({ onUnlock, error }) {
             막기 위한 기능). 계속하려면 접근 신청 비밀번호를 입력해 주세요.
           </div>
           <input
-            className="input"
+            className="input lock-pw-input"
             type="password"
             value={pw}
             onChange={e => setPw(e.target.value)}
@@ -8348,7 +8372,10 @@ function PapsStyles({ children }) {
         .share-link-row { display: flex; gap: 8px; margin: 14px 0 8px; }
         .share-link-row .input { font-size: 12px; }
         .confirm-message { font-size: 13px; line-height: 1.6; color: var(--text); margin-bottom: 18px; }
-        .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+        .practice-lock-hint { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 10px 0; line-height: 1.6; font-size: 13px; }
+        .confirm-actions .btn { min-height: 44px; }
+        .lock-pw-input { font-size: 16px; margin-bottom: 12px; }
 
         .backup-steps { display: flex; flex-direction: column; gap: 16px; margin: 12px 0; }
         .backup-step { display: flex; gap: 12px; }
