@@ -56,7 +56,7 @@ const STEPS = [
     actions: [
       "첫 화면에서 \"처음이신가요? 새 코드 만들기\"를 누르세요.",
       "코드 이름과 비밀번호 2개를 정하세요(개설자 전용 비밀번호는 꼭 정해야 해요). 학교급(초·중·고)도 고르세요.",
-      "\"만들기\"를 누르고, 바로 뜨는 메모 파일(비밀번호·복구 코드)을 꼭 저장하세요.",
+      "\"만들기\"를 누르면 확인창이 떠요. 코드 이름·비밀번호 주의사항을 읽고 \"위 내용을 확인했어요\"에 체크한 뒤 \"코드 만들기\"를 누르세요. 바로 뜨는 메모 파일(비밀번호·복구 코드)은 꼭 저장하세요.",
     ],
     tip: "코드에 학교 이름은 넣지 마세요. 예: 낭만체육123",
     more: [
@@ -563,10 +563,10 @@ const GUIDE_CSS = `
 .gd-screen-bar span { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
 .gd-screen-body { padding: 16px 14px 18px; display: grid; gap: 14px; font-size: 12.5px; color: var(--text); }
 .gd-center { display: grid; justify-items: center; gap: 14px; }
-.gd-brand { font-family: var(--display); color: var(--gold); letter-spacing: 1px; }
-.gd-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-.gd-tab { padding: 3px 7px; border-radius: 6px; color: var(--text-dim); font-size: 11px; }
-.gd-tab.on { background: var(--panel-2); color: var(--text); font-weight: 700; }
+.gd-brand { font-family: var(--display-fun, var(--display)); color: var(--text); letter-spacing: 1px; }
+.gd-tabs { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; border-bottom: 1px solid var(--line); }
+.gd-tab { padding: 3px 7px; color: var(--text-dim); font-size: 11px; white-space: nowrap; border-bottom: 2px solid transparent; }
+.gd-tab.on { color: var(--sel, var(--text)); border-bottom-color: var(--sel, var(--accent)); font-weight: 700; }
 .gd-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: 8px; border: 1px solid var(--line-2);
   background: var(--panel); font-size: 12px; white-space: nowrap; }
 .gd-btn.primary { background: var(--grad, var(--accent)); color: var(--on-accent); border-color: transparent; font-weight: 700; }
@@ -577,8 +577,8 @@ const GUIDE_CSS = `
 .gd-stack { display: grid; gap: 8px; width: 100%; max-width: 260px; }
 .gd-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .gd-between { justify-content: space-between; }
-.gd-chip { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); font-size: 11.5px; white-space: nowrap; }
-.gd-chip.on { background: var(--grad, var(--accent)); border-color: transparent; color: var(--on-accent); font-weight: 700; }
+.gd-chip { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line-2); font-size: 11.5px; white-space: nowrap; }
+.gd-chip.on { background: var(--sel, var(--grad, var(--accent))); border-color: transparent; color: var(--on-sel, var(--on-accent)); font-weight: 700; }
 .gd-drop { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px 10px;
   border: 1.5px dashed var(--line-2); border-radius: 10px; color: var(--text-dim); text-align: center; }
 .gd-list { display: grid; gap: 6px; width: 100%; }

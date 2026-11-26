@@ -2539,18 +2539,71 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
       if (initialPassword.trim() && initialPassword.trim() === founderPassword.trim()) { setCreateError("두 비밀번호는 서로 다르게 정해 주세요."); return; }
     }
     setCreateError("");
-    onSubmit(value, schoolLevel, initialPassword, founderPassword, createOpen ? "create" : "login");
+    // 새로 만들 때는 바로 만들지 않고, 코드 이름·비밀번호 주의사항 확인창을 한 번 거쳐요.
+    if (createOpen) { setCreateConfirmOk(false); setCreateConfirmOpen(true); return; }
+    onSubmit(value, schoolLevel, initialPassword, founderPassword, "login");
   }
+  const [createConfirmOpen, setCreateConfirmOpen] = useState(false);
+  const [createConfirmOk, setCreateConfirmOk] = useState(false);
+  useBackLayer(createConfirmOpen, () => { setCreateConfirmOpen(false); return true; });
+  // 코드 이름에 학교 이름처럼 보이는 말이 있으면 확인창에서 한 번 더 짚어 줘요.
+  const codeLooksLikeSchool = /학교|초등|중학|고등|[가-힣]{2,}(초|중|고|여중|여고|공고|상고)(\d|$)/.test(value.trim());
+  function confirmCreate() {
+    if (!createConfirmOk) return;
+    setCreateConfirmOpen(false);
+    onSubmit(value, schoolLevel, initialPassword, founderPassword, "create");
+  }
+  const createConfirmModal = createConfirmOpen && (
+    <div className="modal-backdrop" onClick={() => setCreateConfirmOpen(false)}>
+      <div className="modal-panel create-confirm" role="dialog" aria-modal="true" aria-labelledby="createConfirmTitle" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3 id="createConfirmTitle"><ShieldCheck size={18} /> 만들기 전에 확인해 주세요</h3>
+          <button className="icon-btn" onClick={() => setCreateConfirmOpen(false)} aria-label="닫기"><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="create-confirm-code">새 코드 <b>{value.trim()}</b></div>
+          {codeLooksLikeSchool && (
+            <div className="warn-note"><AlertTriangle size={16} /><span>코드 이름에 학교 이름이 들어간 것 같아요. 아래 1번을 다시 봐 주세요.</span></div>
+          )}
+          <ol className="create-confirm-list">
+            <li>
+              <b>코드 이름에 학교 이름·지역 이름을 넣지 않았나요?</b>
+              <span>코드는 우리 학교 기록으로 들어가는 문 이름이에요. 학교 이름이면 다른 사람이 쉽게 짐작해 접근 신청을 보내거나, 기록이 어느 학교 학생 것인지 알 수 있게 돼요.</span>
+            </li>
+            <li>
+              <b>개설자 전용 비밀번호는 다른 곳에서 쓰지 않는 새 비밀번호인가요?</b>
+              <span>학교 메일·나이스·업무용 계정과 같으면, 한 곳에서 새어 나갔을 때 다른 곳까지 같이 열려요. 생일·전화번호·학교 이름처럼 짐작하기 쉬운 것도 피해요.</span>
+            </li>
+            <li>
+              <b>개설자 전용 비밀번호는 나만 알고 있나요?</b>
+              <span>동료 선생님에게는 접근 신청 비밀번호를 알려 줘요. 개설자 비밀번호를 알면 마감(전체 삭제)까지 할 수 있어요.</span>
+            </li>
+            <li>
+              <b>만든 뒤 나오는 메모 파일(복구 코드)을 받아 둘 거예요.</b>
+              <span>비밀번호는 아무도 다시 볼 수 없게 저장돼요. 잊으면 복구 코드로만 새로 정할 수 있어요.</span>
+            </li>
+          </ol>
+          <label className="create-confirm-check">
+            <input type="checkbox" checked={createConfirmOk} onChange={e => setCreateConfirmOk(e.target.checked)} />
+            <span>위 내용을 확인했어요</span>
+          </label>
+          <div className="create-confirm-actions">
+            <button className="btn btn-ghost" onClick={() => setCreateConfirmOpen(false)}>다시 고칠게요</button>
+            <button className="btn btn-primary" disabled={!createConfirmOk} onClick={confirmCreate}><Plus size={15} /> 코드 만들기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   if (mode === "code") {
     return (
       <div className="paps-app gate-screen">
+        {createConfirmModal}
         <div className="gate-card">
           <div className="gate-maker"><img src="/icons/yangssaem-face.webp" alt="" width="24" height="24" /><span><b>양쌤스튜디오</b> · 팝스</span></div>
           <div className="gate-brand">
-            <Trophy size={26} color="var(--gold)" />
             <span className="gate-brand-name">SMART PAPS</span>
-            <Trophy size={26} color="var(--gold)" />
           </div>
           <p className="gate-tagline">
             일일이 출력, 수기 기록, 재입력 하던 업무가<br />
@@ -3296,6 +3349,18 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
   const pad = n => String(n).padStart(2, "0");
   const nowText = `${pad(now.getMonth() + 1)}월 ${pad(now.getDate())}일 ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
+  // 메뉴가 한 줄이라 좁은 화면에선 옆으로 밀려 있어요. 화면이 바뀌면 고른 탭이 보이게 메뉴 줄만 옆으로 옮겨요(페이지는 안 움직여요).
+  const tabsRef = useRef(null);
+  useEffect(() => {
+    const box = tabsRef.current;
+    const el = box && box.querySelector(".tab.active");
+    if (!box || !el) return;
+    const left = el.offsetLeft - box.offsetLeft;
+    if (left < box.scrollLeft || left + el.offsetWidth > box.scrollLeft + box.clientWidth) {
+      box.scrollLeft = Math.max(0, left - 24);
+    }
+  }, [view]);
+
   return (
     <div className="topnav">
       <div className="brand">
@@ -3317,7 +3382,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           </span>
         )}
       </div>
-      <div className="tabs">
+      <div className="tabs" ref={tabsRef}>
         {tabs.map(t => {
           const Icon = t.icon;
           return (
@@ -7461,7 +7526,7 @@ function PapsStyles({ children }) {
         @import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Jua&display=swap');
 
         .paps-app {
-          /* P.A.I Studio 홈페이지와 통일한 다크 톤(무채색 베이스 + 코랄-퍼플 그라디언트 강조).
+          /* P.A.I Studio 홈페이지와 통일한 다크 톤(무채색 베이스 + 코랄 단색 강조).
              기존 변수 이름은 코드 곳곳(인라인 아이콘 색상 포함)에서 그대로 쓰이고 있어 값만 바꿨다.
              실제 "위험/삭제" 표시는 이 강조색과 무관하게 여전히 별도의 빨간색을 그대로 사용한다. */
           --bg: #0A0B0D;
@@ -7476,11 +7541,11 @@ function PapsStyles({ children }) {
           --muted: #6B717B;
           --track-red: #FF9570;
           --accent: #FF9570;
-          --accent-2: #9E86FF;
+          --accent-2: #7FB5D9;
           --accent-hover: #FFAC8D;
           --accent-soft: rgba(255,149,112,0.14);
           --on-accent: #0A0B0D;
-          --grad: linear-gradient(100deg, #FF9570 0%, #E48AC4 50%, #9E86FF 100%);
+          --grad: #FF9570;
           --gold: #FFC93C;
           --silver: #C9D3DC;
           --bronze: #CD8B4B;
@@ -7610,9 +7675,7 @@ function PapsStyles({ children }) {
         .gate-screen { display: flex; align-items: center; justify-content: center; min-height:100vh;min-height:100svh; padding: 20px; }
         .gate-card {
           max-width: 420px; width: 100%; background: var(--panel); border: 1px solid var(--line);
-          border-top: 2px solid var(--gold);
-          border-radius: 14px; padding: 36px 30px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;
-          box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+          border-radius: 10px; padding: 36px 30px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;
         }
         .gate-card h2 { font-family: var(--display); font-size: 19px; margin: 6px 0 0; font-weight: 600; letter-spacing: 0.2px; }
         .gate-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 0 0 8px; }
@@ -7788,7 +7851,19 @@ function PapsStyles({ children }) {
         .btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
         .btn.small { padding: 6px 10px; font-size: 12px; }
         .big-btn { width: 100%; justify-content: center; padding: 13px; font-size: 15px; margin-top: 6px; }
-        .gate-create-emphasis { border: 2px solid var(--gold); box-shadow: 0 0 0 3px rgba(255,201,60,0.15); }
+        .gate-create-emphasis { border: 2px solid var(--gold); }
+        .create-confirm { max-width: 460px; text-align: left; }
+        .create-confirm-code { font-size: 14px; color: var(--text-dim); margin-bottom: 10px; }
+        .create-confirm-code b { color: var(--text); font-size: 16px; margin-left: 4px; word-break: break-all; }
+        .create-confirm-list { margin: 10px 0 14px; padding-left: 20px; display: grid; gap: 12px; }
+        .create-confirm-list li { line-height: 1.55; }
+        .create-confirm-list b { display: block; font-size: 14px; color: var(--text); }
+        .create-confirm-list span { display: block; font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+        .create-confirm-check { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 15px; }
+        .create-confirm-check input { width: 20px; height: 20px; accent-color: var(--accent); flex-shrink: 0; }
+        .create-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+        .create-confirm-actions .btn { min-height: 44px; }
+        @media (max-width: 480px) { .create-confirm-actions .btn { flex: 1; justify-content: center; } }
         .icon-btn { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; border-radius: 6px; }
         .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
         .icon-btn.danger:hover { color: var(--track-red); }
@@ -8147,7 +8222,7 @@ function PapsStyles({ children }) {
           display: flex; flex-direction: column; align-items: stretch; gap: 8px;
           flex: 1 1 auto; min-width: max-content; scroll-snap-align: start;
           padding: 6px 6px 8px; border-radius: 10px; background: rgba(255,255,255,0.03);
-          border: 1px solid var(--line); border-top: 3px solid var(--cat-color, var(--text-dim));
+          border: 1px solid var(--line);
         }
         .category-group .category-label { align-self: flex-start; }
         .category-scroll-hint { display: none; text-align: center; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
@@ -8164,8 +8239,8 @@ function PapsStyles({ children }) {
         }
         .category-group .event-chip .mini-check { width: 15px; height: 15px; }
         .category-label {
-          font-size: 11px; font-weight: 800; letter-spacing: 0.3px; color: var(--bg);
-          padding: 4px 10px; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
+          font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--muted); background: transparent !important;
+          padding: 0 0 2px; border-bottom: 2px solid var(--cat-color, var(--line-2)); white-space: nowrap; flex-shrink: 0;
         }
         .drill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
         /* 종목별 기록 입력 카드의 학년·반 고르기: 제목 아래 학년 한 줄, 그 밑에 반 한 줄.
@@ -8611,7 +8686,9 @@ function PapsStyles({ children }) {
           --accent-hover: #A93F10;
           --accent-soft: rgba(226,98,43,0.12);
           --on-accent: #FFFDF8;
-          --grad: linear-gradient(100deg, #E2622B 0%, #EE8A3A 55%, #F2B33D 100%);
+          --grad: #C24B16;
+          --sel: #1D2747;
+          --on-sel: #FFFDF8;
           --gold: #A9781A;
           --silver: #6F7A88;
           --bronze: #A0622E;
@@ -8619,11 +8696,18 @@ function PapsStyles({ children }) {
           --good: #1F7F52;
           --text: #1D2747;
           --text-dim: #4B5373;
-          --display: 'Jua', 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+          --display: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+          --display-fun: 'Jua', 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
           color-scheme: light;
         }
-        html[data-screen-mode="ys"] .paps-app { background: radial-gradient(ellipse at top, #FFF6E8 0%, var(--bg) 62%); }
-        html[data-screen-mode="ys"] .topnav { background: rgba(248,243,234,0.92); }
+        html[data-screen-mode="ys"] .paps-app { background: var(--bg); }
+        html[data-screen-mode="ys"] .topnav { background: var(--bg); }
+        /* 양쌤 컬러(체육관 기록지 결): 주아 글꼴은 앱 이름·종목 이름·큰 숫자에만, 칸은 기록지처럼 얇은 선 */
+        html[data-screen-mode="ys"] :is(.brand-text, .gate-brand-name, .board-event, .podium-name, .podium-value, .timer-big-number, .fiftym-clock, .class-run-clock) { font-family: var(--display-fun); }
+        html[data-screen-mode="ys"] .gate-brand-name { color: var(--text); letter-spacing: 0.5px; }
+        html[data-screen-mode="ys"] .chip:not(.active) { background: transparent; border-color: var(--line-2); }
+        html[data-screen-mode="ys"] .panel { border-color: var(--line-2); }
+        html[data-screen-mode="ys"] .btn-primary:disabled { background: var(--line-2); color: var(--text-dim); opacity: 1; }
         html[data-screen-mode="ys"] .modal-backdrop { background: rgba(29,39,71,0.35); }
         html[data-screen-mode="ys"] .idle-lock-backdrop { background: rgba(248,243,234,0.98); }
 
@@ -8667,11 +8751,9 @@ function PapsStyles({ children }) {
         html[data-screen-mode="night"] .closeout-backup-done { color: #A7BC94; }
         html[data-screen-mode="night"] .closeout-confirm-warn { color: #D2B37C; }
 
-        /* ================= P.A.I Studio 감성 디테일 레이어 =================
-           위에서 이미 만든 클래스들의 값을 그대로 덮어써서, 어두운 무채색 배경
-           + 코랄→퍼플 그라디언트 강조 + 이탤릭 디스플레이 서체 + 모노 라벨이라는
-           P.A.I Studio 홈페이지의 감성을 SMART PAPS 전체에 입힌다. 구조(클래스명)는
-           하나도 바꾸지 않고 "톤앤매너"만 새로 입히는 레이어라, 기능에는 영향이 없다. */
+        /* ================= 공통 디테일 레이어 =================
+           위에서 만든 클래스 값을 덮어써서 톤을 맞춘다. 그라디언트·가짜 기울임(한글 글꼴엔 기울임 모양이 없음)·
+           유리 블러·큰 그림자 같은 장식은 쓰지 않는다. 고른 칩·탭은 --sel(없으면 강조색), 실행 버튼만 강조색. */
 
         .paps-app ::selection { background: var(--track-red); color: var(--on-accent); }
         .paps-app :focus-visible { outline: 2px solid var(--track-red); outline-offset: 2px; }
@@ -8680,49 +8762,57 @@ function PapsStyles({ children }) {
         .paps-app ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 999px; }
         .paps-app ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
-        /* 상단 바: 스크롤해도 고정, 유리질감 블러 */
+        /* 상단 바: 스크롤해도 고정. 첫 줄은 제목·오른쪽 버튼, 둘째 줄은 메뉴 한 줄(넘치면 옆으로 밀기) */
         .topnav {
-          position: sticky; top: 0; z-index: 30;
-          background: rgba(10,11,13,0.78); backdrop-filter: blur(14px) saturate(140%);
-          -webkit-backdrop-filter: blur(14px) saturate(140%);
+          position: sticky; top: 0; z-index: 30; padding-bottom: 0; row-gap: 10px;
+          background: var(--bg);
         }
-        .brand { font-style: italic; font-weight: 900; letter-spacing: -0.01em; }
-        .tab.active { position: relative; }
+        .brand { font-weight: 900; letter-spacing: -0.01em; }
+        .tabs {
+          order: 3; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+          margin: 0 -20px; padding: 0 20px; border-top: 1px solid var(--line); -webkit-overflow-scrolling: touch;
+        }
+        .tabs::-webkit-scrollbar { display: none; }
+        .tab { flex-shrink: 0; white-space: nowrap; min-height: 44px; border-radius: 0; }
+        .tab.active { position: relative; background: transparent; color: var(--sel, var(--text)); font-weight: 700; }
         .tab.active::after {
-          content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px;
-          background: var(--grad); border-radius: 2px 2px 0 0;
+          content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px;
+          background: var(--sel, var(--accent)); border-radius: 2px 2px 0 0;
         }
+        .tab-danger.active::after { background: #E85D5D; }
+        .nav-right { flex-wrap: nowrap; }
 
-        /* 버튼: 주 강조 버튼은 그라디언트, 나머지는 톤 정리 */
-        .btn { border-radius: 10px; letter-spacing: 0; }
+        /* 버튼: 실행 버튼만 강조색 단색, 나머지는 톤 정리 */
+        .btn { border-radius: 8px; letter-spacing: 0; }
         .btn-primary { background: var(--grad); color: var(--on-accent); font-weight: 700; }
         .btn-primary:hover:not(:disabled) { filter: brightness(1.07); opacity: 1; }
         .btn-secondary { background: var(--surface-2); border: 1px solid var(--line); }
-        .big-btn { border-radius: 12px; }
+        .big-btn { border-radius: 8px; }
 
-        /* 칩(필터): 알약형 + 활성 시 그라디언트 */
-        .chip { border-radius: 999px; }
-        .chip.active { background: var(--grad); border-color: transparent; color: var(--on-accent); font-weight: 700; }
+        /* 칩(필터): 덜 둥근 네모 + 고르면 --sel 단색 */
+        .chip { border-radius: 8px; }
+        .chip.active { background: var(--sel, var(--grad)); border-color: var(--sel, transparent); color: var(--on-sel, var(--on-accent)); font-weight: 700; }
         .check-chip.active { border-color: var(--track-red); background: var(--accent-soft); }
         .drill-chip.active { border-color: var(--track-red); background: var(--accent-soft); }
 
-        /* 패널/카드: 테두리·그림자 톤 정리, 헤더는 이탤릭 디스플레이 서체 */
-        .panel { border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.35); }
+        /* 패널/카드: 기록지처럼 얇은 선, 그림자 없음. 제목은 밑줄로 칸을 나눔 */
+        .panel { border-radius: 8px; box-shadow: none; }
         .panel h3 {
-          font-family: var(--display); font-style: italic; font-weight: 800; letter-spacing: -0.01em;
+          font-family: var(--display); font-weight: 700; letter-spacing: -0.01em;
+          border-left: 0; padding: 0 0 10px; border-bottom: 1px solid var(--line);
         }
         .podium-card, .overview-card, .modal-panel, .rank-row {
           border-color: var(--line);
         }
-        .overview-card-head { font-family: var(--display); font-style: italic; font-weight: 800; }
+        .overview-card-head { font-family: var(--display); font-weight: 800; }
 
-        /* 큰 숫자(타이머·전광판·클럭)는 이탤릭 900으로 더 힘 있게 */
+        /* 큰 숫자(타이머·전광판·클럭)는 굵게 */
         .timer-big-number.huge, .board-event, .fiftym-clock, .class-run-clock,
         .intro-splash-title, .cs-name, .closeout-title {
-          font-style: italic; font-weight: 900; letter-spacing: -0.02em;
+          font-weight: 900; letter-spacing: -0.02em;
         }
         .intro-splash-glow {
-          background: radial-gradient(circle, rgba(255,149,112,0.32) 0%, rgba(158,134,255,0.12) 55%, transparent 72%);
+          background: radial-gradient(circle, rgba(255,149,112,0.28) 0%, transparent 70%);
         }
 
         /* 작은 라벨류: 모노스페이스 + 대문자 트래킹 (값 위에 붙는 캡션) */
@@ -8761,12 +8851,13 @@ function PapsStyles({ children }) {
           .topnav { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; }
           .brand { justify-content: center; text-align: center; flex-wrap: wrap; gap: 6px 10px; }
           .brand-text { font-size: 15px; }
-          .tabs { flex-wrap: wrap; justify-content: center; overflow-x: visible; margin: 0; padding: 0; }
+          .topnav { padding-bottom: 0; flex-wrap: nowrap; }
+          .tabs { flex: 0 0 auto; margin: 0 -12px; padding: 0 12px; }
           .tab { padding: 8px 10px; }
-          .tab span { font-size: 12px; }
-          .nav-right { width: 100%; margin-left: 0; justify-content: center; flex-wrap: wrap; }
-          .datetime-row { width: 100%; justify-content: center; }
-          .nav-right .btn { flex: 1; justify-content: center; }
+          .tab span { font-size: 13px; }
+          .nav-right { width: 100%; margin-left: 0; justify-content: center; gap: 8px; }
+          .datetime-row { display: none; } /* 측정 연도는 등급표 제목에도 나와요 */
+          .nav-right .btn, .nav-right .screen-mode-select { flex: 1; justify-content: center; }
 
           .info-banner { padding: 10px 14px; font-size: 12px; line-height: 1.55; }
 
