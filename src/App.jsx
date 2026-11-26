@@ -2560,7 +2560,6 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
             <button className="manual-btn" onClick={() => setManualOpen(true)}>
               <BookOpen size={13} /> 사용 가이드
             </button>
-            <InstallHomeButton className="manual-btn install-btn" />
             <button className="manual-btn practice-btn" onClick={onStartPractice}>
               <PlayCircle size={13} /> 연습모드 체험
             </button>
@@ -2705,6 +2704,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
               <button className="gate-link-btn gate-forgot" onClick={() => { setRecCode(value); setRecError(""); setRecDone(null); setMode("recover"); }}>
                 개설자 전용 비밀번호를 잊었어요
               </button>
+              <InstallHomeButton className="gate-install-link" iconSize={12} />
 
               <div className="gate-divider" />
 
@@ -3555,7 +3555,7 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
 
 // "홈 화면에 설치" 버튼: 안드로이드·PC 크롬은 한 번 눌러 바로 설치 창, 아이폰·아이패드와
 // 버튼 설치가 안 되는 브라우저는 순서 안내 창을 띄워요. 이미 설치한 앱으로 열었으면 숨겨요.
-function InstallHomeButton({ className = "manual-btn install-btn", label = "홈 화면에 설치", iconSize = 13 }) {
+function InstallHomeButton({ className = "gate-install-link", label = "홈 화면에 설치", iconSize = 13 }) {
   const pwa = usePwaInstall();
   const [guideOpen, setGuideOpen] = useState(false);
   const [done, setDone] = useState(false);
@@ -7694,10 +7694,9 @@ function PapsStyles({ children }) {
           padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; margin-bottom: 4px;
         }
         .manual-btn:hover { background: rgba(255,201,60,0.22); }
-        .install-btn { border-color: var(--line); color: var(--text); background: transparent; }
-        .install-btn:hover { background: rgba(127,127,127,0.10); }
-        .install-btn:disabled { opacity: 0.7; cursor: default; }
-        @media (pointer: coarse) { .gate-help-row .manual-btn { min-height: 44px; padding: 8px 14px; font-size: 13px; } }
+        .gate-install-link { display: inline-flex; align-items: center; justify-content: center; gap: 4px; margin: 0 auto; padding: 6px 10px; background: none; border: none; color: var(--text-dim); font-size: 12px; cursor: pointer; }
+        .gate-install-link:hover { color: var(--text); }
+        .gate-install-link:disabled { cursor: default; }
         .install-panel { max-width: 420px; text-align: left; }
         .install-lead { margin: 0 0 14px; }
         .install-step-text { font-size: 14px; color: var(--text); line-height: 1.55; padding-top: 1px; }
