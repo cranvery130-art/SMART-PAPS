@@ -56,7 +56,7 @@ const STEPS = [
     actions: [
       "첫 화면에서 \"처음이신가요? 새 코드 만들기\"를 누르세요.",
       "코드 이름과 비밀번호 2개를 정하세요(개설자 전용 비밀번호는 꼭 정해야 해요). 학교급(초·중·고)도 고르세요.",
-      "\"만들기\"를 누르고, 바로 뜨는 메모 파일(비밀번호·복구 코드)을 꼭 저장하세요.",
+      "\"만들기\"를 누르면 확인창이 떠요. 코드 이름·비밀번호 주의사항을 읽고 \"위 내용을 확인했어요\"에 체크한 뒤 \"코드 만들기\"를 누르세요. 바로 뜨는 메모 파일(비밀번호·복구 코드)은 꼭 저장하세요.",
     ],
     tip: "코드에 학교 이름은 넣지 마세요. 예: 낭만체육123",
     more: [
@@ -305,38 +305,145 @@ const STEPS = [
   },
 ];
 
+// 기능 한눈에: 항목마다 [번호, 설명]. 같은 번호는 데모 화면의 같은 표시를 가리켜요.
 const FEATURES = [
   { icon: Plus, title: "측정 도구", items: [
-    "심박수·부위 점수를 넣으면 지수·합계가 바로 계산돼요.",
-    "윗몸말아올리기·스텝검사는 교육부 공식 음원, 왕복오래달리기는 신호음이나 유튜브 영상으로 진행해요.",
-    "50m 그룹 타이머, 반 전체 동시 출발 타이머, 운동장 코스 계산기가 있어요.",
-  ] },
+    [1, "심박수·부위 점수를 넣으면 지수·합계가 바로 계산돼요."],
+    [2, "윗몸말아올리기·스텝검사는 교육부 공식 음원, 왕복오래달리기는 신호음이나 유튜브 영상으로 진행해요."],
+    [3, "50m 그룹 타이머, 반 전체 동시 출발 타이머, 운동장 코스 계산기가 있어요."],
+  ], Demo: () => (
+    <Screen label="측정 도구 화면">
+      <T n="1" block>
+        <span className="gd-row gd-between gd-card">
+          <span className="gd-row"><span className="gd-sub">맥박</span><span className="gd-input">82</span><span className="gd-input">74</span><span className="gd-input">68</span></span>
+          <b>지수 <span className="gd-ok">80.6</span></b>
+        </span>
+      </T>
+      <T n="2" block><span className="gd-row"><Chip on>공식 음원</Chip><Chip>신호음</Chip><Chip>유튜브 영상</Chip><Btn primary>▶ 재생</Btn></span></T>
+      <T n="3" block>
+        <span className="gd-row gd-between gd-card">
+          <span className="gd-big"><small>50m 그룹 타이머</small>8.83초</span>
+          <Btn primary>출발</Btn>
+        </span>
+      </T>
+    </Screen>
+  ) },
   { icon: Users, title: "함께 쓰기", items: [
-    "조회는 비밀번호만 맞으면 바로, 수정은 개설자가 승인해야 돼요.",
-    "누가 언제 어떤 기록을 바꿨는지 남고, 잘못 바꾼 기록은 되돌릴 수 있어요(BMI·체지방률은 입력한 기기에서만).",
-    "휴대폰·노트북 어디서 입력해도 몇 초 안에 모두에게 반영돼요(신장·체중·BMI·체지방률은 입력한 기기에만).",
-  ] },
+    [1, "조회는 비밀번호만 맞으면 바로, 수정은 개설자가 승인해야 돼요."],
+    [2, "누가 언제 어떤 기록을 바꿨는지 남고, 잘못 바꾼 기록은 되돌릴 수 있어요(BMI·체지방률은 입력한 기기에서만)."],
+    [3, "휴대폰·노트북 어디서 입력해도 몇 초 안에 모두에게 반영돼요(신장·체중·BMI·체지방률은 입력한 기기에만)."],
+  ], Demo: () => (
+    <Screen label="접근권한 화면">
+      <MiniTabs active="접근권한" />
+      <T n="1" block>
+        <span className="gd-row gd-between gd-card"><span>김선생 · 조회 중 · <b>수정 신청</b></span><Btn primary>승인</Btn></span>
+      </T>
+      <T n="2" block>
+        <span className="gd-row gd-between gd-card"><span className="gd-sub">10:42 박선생 · 1-1-3 왕복 52 → 58</span><Btn>되돌리기</Btn></span>
+      </T>
+      <T n="3"><span className="gd-sync"><i />3초 전 동기화</span></T>
+    </Screen>
+  ) },
   { icon: ShieldCheck, title: "개인정보 보호", items: [
-    "학교 코드와 비밀번호를 모두 알아야 들어올 수 있어요. 비밀번호가 맞는지와 누가 무엇을 할 수 있는지는 서버가 직접 확인해요.",
-    "비밀번호와 복구 코드는 원래 글자 대신 되돌릴 수 없는 암호(해시)로만 저장해요.",
-    "학생 이름은 서버에 보내지 않고 이 기기에만 저장해요. 전광판엔 학년-반-번호만 나와요.",
-    "신장·체중·BMI·체지방률(건강 정보)도 서버에 보내지 않고 입력한 기기에만 저장해요. 다른 PC로 옮길 땐 파일로 옮겨요.",
-    "접근 신청 비밀번호를 정해 두면, 12분 동안 아무것도 안 할 때 화면이 자동으로 잠겨요(공용 PC 보호).",
-    "틀린 비밀번호는 5초에 한 번만 다시 넣을 수 있고, 한 기기에서 5번 틀리면 10분 동안 신청이 막혀요.",
-    "받는 정보·저장하는 곳·지우는 법은 첫 화면 아래 \"개인정보 안내\"(양쌤스튜디오 홈페이지)에 정리돼 있어요. 지워 달라는 요청도 거기서 보낼 수 있어요.",
-  ] },
+    [1, "학교 코드와 비밀번호를 모두 알아야 들어올 수 있어요. 비밀번호가 맞는지와 누가 무엇을 할 수 있는지는 서버가 직접 확인해요."],
+    [1, "비밀번호와 복구 코드는 원래 글자 대신 되돌릴 수 없는 암호(해시)로만 저장해요."],
+    [2, "학생 이름은 서버에 보내지 않고 이 기기에만 저장해요. 전광판엔 학년-반-번호만 나와요."],
+    [2, "신장·체중·BMI·체지방률(건강 정보)도 서버에 보내지 않고 입력한 기기에만 저장해요. 다른 PC로 옮길 땐 파일로 옮겨요."],
+    [3, "접근 신청 비밀번호를 정해 두면, 12분 동안 아무것도 안 할 때 화면이 자동으로 잠겨요(공용 PC 보호)."],
+    [3, "틀린 비밀번호는 5초에 한 번만 다시 넣을 수 있고, 한 기기에서 5번 틀리면 10분 동안 신청이 막혀요."],
+    [4, "받는 정보·저장하는 곳·지우는 법은 첫 화면 아래 \"개인정보 안내\"(양쌤스튜디오 홈페이지)에 정리돼 있어요. 지워 달라는 요청도 거기서 보낼 수 있어요."],
+  ], Demo: () => (
+    <Screen label="개인정보 보호가 보이는 곳">
+      <T n="1" block>
+        <span className="gd-stack gd-wide"><Field label="학교 코드" value="낭만체육123" /><Field label="비밀번호" value="••••••" /></span>
+      </T>
+      <T n="2" block>
+        <span className="gd-list">
+          <span><b>1-1-3</b> 84회 <span className="gd-sub">← 서버·전광판엔 번호만</span></span>
+          <span><b>김하늘</b> · 키 158 <span className="gd-sub">← 이 기기에만</span></span>
+        </span>
+      </T>
+      <T n="3" block><span className="gd-card gd-sub">12분 동안 쓰지 않아 화면을 잠갔어요 · 비밀번호를 5번 틀리면 10분 기다려요</span></T>
+      <T n="4"><span className="gd-link">개인정보 안내 · 받는 정보와 지우는 법</span></T>
+    </Screen>
+  ) },
   { icon: Database, title: "나이스·백업", items: [
-    "나이스 학생명렬 엑셀로 명단을 한 번에 등록해요.",
-    "나이스 양식 파일에 우리 기록을 자동으로 채워 줘요.",
-    "건강 기록(신장·체중·BMI·체지방률)은 \"건강 기록 내보내기\" 파일로 다른 학교 PC에 옮겨요.",
-    "파일을 내려받을 때마다 다 쓰면 지우라는 안내가 떠요.",
-  ] },
+    [1, "나이스 학생명렬 엑셀로 명단을 한 번에 등록해요."],
+    [2, "나이스 양식 파일에 우리 기록을 자동으로 채워 줘요."],
+    [3, "건강 기록(신장·체중·BMI·체지방률)은 \"건강 기록 내보내기\" 파일로 다른 학교 PC에 옮겨요."],
+    [4, "파일을 내려받을 때마다 다 쓰면 지우라는 안내가 떠요."],
+  ], Demo: () => (
+    <Screen label="데이터 백업 화면">
+      <MiniTabs active="데이터 백업" />
+      <T n="1" block><span className="gd-drop">학생명렬.xlsx → 명단 등록</span></T>
+      <span className="gd-row">
+        <T n="2"><Btn primary>나이스 양식 채우기</Btn></T>
+        <T n="3"><Btn>건강 기록 내보내기</Btn></T>
+      </span>
+      <T n="4" block><span className="gd-card gd-sub">내려받은 파일은 다 쓴 뒤 꼭 지워 주세요.</span></T>
+    </Screen>
+  ) },
   { icon: Trash2, title: "보관 기간", items: [
-    "기록은 \"마감\"을 누르기 전까지 보관돼요.",
-    "마감하면 기록·명단·학교 코드가 모두 바로 지워져요.",
-    "마감을 잊어도 1년이 지나면 자동으로 지워져요(30일 전부터 알림, 연장 가능).",
-  ] },
+    [1, "기록은 \"마감\"을 누르기 전까지 보관돼요."],
+    [2, "마감하면 기록·명단·학교 코드가 모두 바로 지워져요."],
+    [3, "마감을 잊어도 1년이 지나면 자동으로 지워져요(30일 전부터 알림, 연장 가능)."],
+  ], Demo: () => (
+    <Screen label="마감 화면">
+      <T n="3" block><span className="gd-row gd-between gd-card"><span className="gd-sub">자동 삭제까지 28일 남았어요</span><Btn>1년 연장</Btn></span></T>
+      <T n="1" hl={false}><span className="gd-tab on">마감</span></T>
+      <T n="2" block><span className="gd-row gd-between gd-card"><span className="gd-sub">기록·명단·학교 코드를 모두 지워요</span><span className="gd-btn danger">마감하기</span></span></T>
+    </Screen>
+  ) },
 ];
+
+// 여러 기기·주의사항: 글과 함께 보는 작은 화면(번호 표시 없이 모습만)
+const DevicePair = ({ left, right }) => (
+  <span className="gd-devices">
+    <span className="gd-device laptop"><small>노트북</small>{left}</span>
+    <span className="gd-device phone"><small>휴대폰</small>{right}</span>
+  </span>
+);
+const DEVICE_DEMOS = {
+  "여러 기기에서 쓰기": () => (
+    <Screen label="노트북과 휴대폰에 같은 기록이 보이는 모습">
+      <DevicePair
+        left={<><span>1-1-3 왕복 <b>58</b></span><span className="gd-sub">키 158</span></>}
+        right={<><span>1-1-3 왕복 <b>58</b></span><span className="gd-sub">키: 이 기기에 없음</span></>} />
+    </Screen>
+  ),
+  "화면 모드": () => (
+    <Screen label="화면 모드 고르는 칸">
+      <span className="gd-row gd-between">
+        <span className="gd-menu">
+          <span className="on">양쌤 컬러 (기본)</span><span>눈 보호</span><span>눈 보호 · 야간</span><span>어두운 화면</span>
+        </span>
+        <Btn>빔프로젝터 고정모드</Btn>
+      </span>
+    </Screen>
+  ),
+  "나눠 쓰는 예": () => (
+    <Screen label="교무실 노트북과 운동장 휴대폰">
+      <DevicePair
+        left={<><b>교무실</b><span className="gd-sub">등급표 · 나이스 양식</span></>}
+        right={<><b>운동장</b><span className="gd-sub">기록 입력</span></>} />
+    </Screen>
+  ),
+  "다시 들어와야 할 때": () => (
+    <Screen label="새 기기 첫 화면">
+      <div className="gd-center">
+        <b className="gd-brand">SMART PAPS</b>
+        <span className="gd-row"><Btn primary>코드로 로그인</Btn><span className="gd-sub">개설자</span></span>
+        <span className="gd-row"><Btn>접근 신청</Btn><span className="gd-sub">동료 선생님</span></span>
+      </div>
+    </Screen>
+  ),
+  "조심할 점": () => (
+    <Screen label="브라우저 데이터를 지우기 전에">
+      <span className="gd-card gd-sub">시크릿 모드 · 브라우저 데이터 지우기 → 이 기기의 로그인·학생 이름표·건강 기록이 사라져요</span>
+      <span className="gd-row"><Btn primary>건강 기록 내보내기</Btn><span className="gd-sub">먼저 파일로 받아 두기</span></span>
+    </Screen>
+  ),
+};
 
 const DEVICE_NOTES = [
   { title: "여러 기기에서 쓰기", body: "같은 학교 코드로 들어오면 휴대폰·노트북 모두 같은 기록을 봐요. 신장·체중·BMI·체지방률만은 입력한 기기에만 있어요. 개설자는 \"코드로 로그인\"에 코드와 개설자 전용 비밀번호를, 동료는 \"접근 신청\"을 쓰면 돼요." },
@@ -441,13 +548,19 @@ export function GuideContent({ inApp = false, role, isFounder, isPractice, onGo,
       )}
 
       {section === "features" && (
-        <div className="gd-feature-grid">
+        <div className="gd-feature-list">
           {FEATURES.map(f => {
             const Icon = f.icon;
+            const Demo = f.Demo;
             return (
-              <div key={f.title} className="gd-feature">
+              <div key={f.title} className="gd-feature gd-feature-row">
                 <h4><Icon size={16} /> {f.title}</h4>
-                <ul>{f.items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+                <div className="gd-step-grid">
+                  <div className="gd-demo"><Demo /></div>
+                  <ol className="gd-actions small">
+                    {f.items.map(([n, text], i) => <li key={i}><i className="gd-pin static">{n}</i><span>{text}</span></li>)}
+                  </ol>
+                </div>
               </div>
             );
           })}
@@ -458,13 +571,19 @@ export function GuideContent({ inApp = false, role, isFounder, isPractice, onGo,
       )}
 
       {section === "devices" && (
-        <div className="gd-feature-grid">
-          {DEVICE_NOTES.map(d => (
-            <div key={d.title} className="gd-feature">
-              <h4>{d.title}</h4>
-              <p>{d.body}</p>
-            </div>
-          ))}
+        <div className="gd-feature-list">
+          {DEVICE_NOTES.map(d => {
+            const Demo = DEVICE_DEMOS[d.title];
+            return (
+              <div key={d.title} className="gd-feature gd-feature-row">
+                <h4>{d.title}</h4>
+                <div className="gd-step-grid">
+                  {Demo && <div className="gd-demo"><Demo /></div>}
+                  <p>{d.body}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
       <style>{GUIDE_CSS}</style>
@@ -563,10 +682,10 @@ const GUIDE_CSS = `
 .gd-screen-bar span { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
 .gd-screen-body { padding: 16px 14px 18px; display: grid; gap: 14px; font-size: 12.5px; color: var(--text); }
 .gd-center { display: grid; justify-items: center; gap: 14px; }
-.gd-brand { font-family: var(--display); color: var(--gold); letter-spacing: 1px; }
-.gd-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-.gd-tab { padding: 3px 7px; border-radius: 6px; color: var(--text-dim); font-size: 11px; }
-.gd-tab.on { background: var(--panel-2); color: var(--text); font-weight: 700; }
+.gd-brand { font-family: var(--display-fun, var(--display)); color: var(--text); letter-spacing: 1px; }
+.gd-tabs { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; border-bottom: 1px solid var(--line); }
+.gd-tab { padding: 3px 7px; color: var(--text-dim); font-size: 11px; white-space: nowrap; border-bottom: 2px solid transparent; }
+.gd-tab.on { color: var(--sel, var(--text)); border-bottom-color: var(--sel, var(--accent)); font-weight: 700; }
 .gd-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: 8px; border: 1px solid var(--line-2);
   background: var(--panel); font-size: 12px; white-space: nowrap; }
 .gd-btn.primary { background: var(--grad, var(--accent)); color: var(--on-accent); border-color: transparent; font-weight: 700; }
@@ -577,8 +696,8 @@ const GUIDE_CSS = `
 .gd-stack { display: grid; gap: 8px; width: 100%; max-width: 260px; }
 .gd-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .gd-between { justify-content: space-between; }
-.gd-chip { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); font-size: 11.5px; white-space: nowrap; }
-.gd-chip.on { background: var(--grad, var(--accent)); border-color: transparent; color: var(--on-accent); font-weight: 700; }
+.gd-chip { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line-2); font-size: 11.5px; white-space: nowrap; }
+.gd-chip.on { background: var(--sel, var(--grad, var(--accent))); border-color: transparent; color: var(--on-sel, var(--on-accent)); font-weight: 700; }
 .gd-drop { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px 10px;
   border: 1.5px dashed var(--line-2); border-radius: 10px; color: var(--text-dim); text-align: center; }
 .gd-list { display: grid; gap: 6px; width: 100%; }
@@ -610,4 +729,19 @@ const GUIDE_CSS = `
 .gd-feature h4 svg { color: var(--gold); }
 .gd-feature ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; line-height: 1.6; word-break: keep-all; }
 .gd-feature p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--text-dim); word-break: keep-all; }
+.gd-feature-list { display: grid; gap: 14px; }
+.gd-feature-row { background: var(--panel); }
+.gd-feature-row p { font-size: 14.5px; color: var(--text); }
+.gd-actions.small li { font-size: 14px; }
+.gd-wide { max-width: none; }
+.gd-sync { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; font-weight: 700; color: var(--good, #2F7A3E); border: 1px solid currentColor; font-size: 11.5px; }
+.gd-sync i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.gd-link { text-decoration: underline; color: var(--text-dim); font-size: 11.5px; }
+.gd-devices { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; align-items: end; }
+.gd-device { display: grid; gap: 4px; padding: 10px; border: 1.5px solid var(--line-2); border-radius: 8px; background: var(--panel); min-width: 0; }
+.gd-device.phone { border-radius: 14px; }
+.gd-device small { color: var(--text-dim); font-size: 10.5px; }
+.gd-menu { display: grid; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: var(--panel); font-size: 11.5px; }
+.gd-menu span { padding: 4px 10px; }
+.gd-menu .on { background: var(--sel, var(--accent)); color: var(--on-sel, var(--on-accent)); font-weight: 700; }
 `;
