@@ -1,4 +1,4 @@
-# SMART PAPS — 독립 웹사이트 버전
+# AI:PAPS(아이팝스, 옛 이름 SMART PAPS) — 독립 웹사이트 버전
 
 중학교 체육수업용 PAPS(팝스) 실시간 기록·랭킹 관리 프로그램입니다. 기존 Claude 아티팩트
 (`paps_dashboard.jsx`)를 React + Firebase(Firestore) 기반의 독립 웹 프로젝트로 옮긴
