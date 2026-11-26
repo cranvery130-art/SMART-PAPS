@@ -7731,8 +7731,6 @@ function PapsStyles({ children }) {
         .brand-text .aipaps { font-size: 20px; font-style: normal; }
         .brand-school { font-family: var(--display); }
         .gate-brand-name .aipaps { font-size: 34px; }
-        .gate-brand-name .aipaps-paps { color: var(--text); }
-        .brand-text .aipaps-paps { color: var(--text); }
         .tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
         .tab {
           display: flex; align-items: center; gap: 6px; padding: 8px 12px;

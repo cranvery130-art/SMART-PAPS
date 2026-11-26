@@ -15,4 +15,4 @@
    </g>
    <path d="M256 236 L256 150" stroke="#1D2747" stroke-width="12" stroke-linecap="round"/>
    <circle cx="256" cy="236" r="16" fill="#1D2747"/>
-  </g></g><text x="256" y="484" text-anchor="middle" font-family="Jua" font-size="60" fill="#1D2747" letter-spacing="3"><tspan fill="#C24E1A">AI:</tspan>PAPS</text></svg>
+  </g></g><g transform="translate(136.5 441.3) scale(0.06)"><g fill="none" stroke="#1D2747" stroke-linecap="round" stroke-linejoin="round"><path d="M92 646 L372 254 L640 646" stroke-width="136"/><path d="M196 482 L566 420" stroke-width="104"/></g><circle cx="404" cy="86" r="80" fill="#E2622B"/><path d="M885 418 V646" stroke="#1D2747" stroke-width="140" stroke-linecap="round"/><rect x="858" y="0" width="54" height="52" rx="14" fill="#1D2747"/><circle cx="885" cy="178" r="116" fill="#1D2747"/><path d="M885 178 L885 92 A86 86 0 0 1 962 216 Z" fill="#E2622B"/></g><text x="200.9" y="484" font-family="Jua" font-size="60" fill="#1D2747" letter-spacing="3"><tspan fill="#E2622B">:</tspan>PAPS</text></svg>
