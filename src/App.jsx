@@ -866,31 +866,31 @@ async function seedPracticeWorkspace() {
 /* ============================== 메인 앱 ============================== */
 
 const SCREEN_MODE_KEY = "smartpaps_screen_mode";
-// 화면 모드: 눈 보호(기본), 야간 눈 보호, 양쌤 컬러, 어두운 화면 네 가지를 둔다.
-//  - paper: 밝은 곳(교실·체육관·운동장 스마트폰)에서 쓰는 따뜻한 종이색 눈 보호 화면(기본)
+// 화면 모드: 양쌤 컬러(기본), 눈 보호, 야간 눈 보호, 어두운 화면 네 가지를 둔다.
+//  - paper: 밝은 곳(교실·체육관·운동장 스마트폰)에서 쓰는 누런 종이색 + 녹색 강조 눈 보호 화면
 //  - night: 어두운 곳·저녁에 쓰는, 밝기와 푸른빛을 크게 낮춘 눈 보호 화면
-//  - ys: 양쌤스튜디오 홈페이지와 같은 종이색 + 남색 + 코트 주황 화면
+//  - ys: 양쌤스튜디오 홈페이지와 같은 종이색 + 남색 + 코트 주황 화면(기본)
 //  - dark: 예전 기본이던 어두운 화면
 const SCREEN_MODES = [
-  { id: "paper", label: "눈 보호 (기본)" },
+  { id: "ys", label: "양쌤 컬러 (기본)" },
+  { id: "paper", label: "눈 보호" },
   { id: "night", label: "눈 보호 · 야간" },
-  { id: "ys", label: "양쌤 컬러" },
   { id: "dark", label: "어두운 화면" },
 ];
 function readScreenMode() {
   try {
     let v = window.localStorage.getItem(SCREEN_MODE_KEY);
     if (v === "comfort") v = "night"; // 직전 버전 이름 호환
-    if (v === "default") v = "paper"; // 예전 기본(어두운 화면)은 새 기본(눈 보호)으로 옮겨요. 어두운 화면은 메뉴에서 다시 고를 수 있어요
+    if (v === "default") v = "ys"; // 예전 기본(어두운 화면)은 새 기본(양쌤 컬러)으로 옮겨요. 어두운 화면은 메뉴에서 다시 고를 수 있어요
     if (SCREEN_MODES.some(m => m.id === v)) return v;
   } catch (e) {}
-  return "paper";
+  return "ys";
 }
 
 export default function PapsApp({ initialWorkspaceCode = null, forcePresentation = false, autoStartPractice = false } = {}) {
   const [workspaceCode, setWorkspaceCode] = useState(initialWorkspaceCode);
   const isPractice = workspaceCode === PRACTICE_CODE;
-  // 화면 모드(눈 보호(기본) / 눈 보호 · 야간 / 양쌤 컬러 / 어두운 화면)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
+  // 화면 모드(양쌤 컬러(기본) / 눈 보호 / 눈 보호 · 야간 / 어두운 화면)는 눈의 피로도처럼 사람마다 다른 취향이라 학교 코드 전체 설정이
   // 아니라 "이 기기"에만 저장한다. 그래서 개설자·동료 교사 누구나 각자 바꿀 수 있고, 첫 화면과
   // 같은 기기에서 연 빔프로젝터 새 창에도 똑같이 적용된다.
   const [screenMode, setScreenMode] = useState(readScreenMode);
@@ -3299,21 +3299,21 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
   return (
     <div className="topnav">
       <div className="brand">
-        <span className="sync-indicator">
-          <RefreshCw size={12} className="spin-slow" />
+        <span className={"sync-indicator" + (secAgo !== null ? " live" : "")} title="다른 기기와 기록이 자동으로 맞춰져요">
+          <span className="sync-dot" aria-hidden="true" />
           {secAgo !== null ? secAgo + "초 전 동기화" : "동기화 대기"}
         </span>
         <Trophy size={20} color="var(--gold)" />
         <span className="brand-text">{schoolName ? schoolName + " " : ""}SMART PAPS</span>
         {isPractice ? (
-          <span className="workspace-badge practice-badge" title="가짜 학생으로 체험 중">연습모드</span>
+          <span className="workspace-badge practice-badge" title="가짜 학생으로 체험 중"><PlayCircle size={13} />연습모드</span>
         ) : isAdmin ? (
-          <button className="workspace-badge" onClick={onChangeWorkspace} title="워크스페이스 코드 변경">
-            코드: {workspaceCode}
+          <button className="workspace-badge code-badge" onClick={onChangeWorkspace} title="학교 코드 바꾸기">
+            <KeyRound size={13} /><span className="workspace-badge-label">학교 코드</span><b>{workspaceCode}</b>
           </button>
         ) : (
           <span className="workspace-badge viewer-badge" title="조회 전용 계정">
-            조회 전용
+            <Eye size={13} />조회 전용
           </span>
         )}
       </div>
@@ -3339,7 +3339,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           <span className="now-text">{nowText}</span>
         </div>
         {onChangeScreenMode && (
-          <label className={"screen-mode-select" + (screenMode !== "paper" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용돼요">
+          <label className={"screen-mode-select" + (screenMode !== "ys" ? " on" : "")} title="화면 모드 선택 — 이 기기에만 적용돼요">
             <Eye size={14} />
             <select value={screenMode} onChange={e => onChangeScreenMode(e.target.value)} aria-label="화면 모드 선택">
               {SCREEN_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -4239,7 +4239,7 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
           {EVENT_CATEGORY_GROUPS.map(g => {
             const color = CATEGORY_COLORS[g.category] || "var(--text-dim)";
             return (
-              <div className="category-group" key={g.category} style={{ "--cat-color": color }}>
+              <div className="category-group" key={g.category} style={{ "--cat-color": color, "--n": g.events.length }}>
                 <div className="category-label" style={{ background: color }}>{g.category}</div>
                 <div className="chip-row">
                   {g.events.map(e => (
@@ -4257,7 +4257,32 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
             );
           })}
         </div>
+        <div className="category-scroll-hint">← 옆으로 밀면 다른 종목도 있어요 →</div>
       </div>
+
+      {/* 종목을 고르면 바로 아래에서 측정 방법부터 확인하고, 그 다음 도구·기록 입력으로 내려가요 */}
+      {EVENT_METHOD_INFO[eventId] && (
+        <div className="panel method-ref-panel">
+          <h3>측정 방법 참고 <span className="board-cat">({ev.name})</span></h3>
+          <div className="method-ref-row">
+            <div className="text-dim small-note method-ref-tip">{EVENT_METHOD_INFO[eventId].tip}</div>
+            <a
+              className="btn btn-secondary method-ref-btn"
+              href={EVENT_METHOD_INFO[eventId].videoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Play size={14} /> 새 탭에서 측정 방법 영상 보기
+            </a>
+          </div>
+          <div className="text-dim small-note">
+            교육부 학생건강정보센터 PAPS 안내자료 기준이에요. 버튼을 누르면 새 탭(또는 유튜브 앱)에서 열려요. 버튼이 반응하지 않으면 아래 주소를 길게 눌러 복사한 뒤 브라우저에 직접 붙여넣어 열어주세요.
+          </div>
+          <div className="method-ref-url-row">
+            <input className="input method-ref-url" readOnly value={EVENT_METHOD_INFO[eventId].videoUrl} onFocus={e => e.target.select()} />
+          </div>
+        </div>
+      )}
 
       {isBigTool ? (
         <>
@@ -4310,29 +4335,6 @@ function RecordManagementView({ students, records, activeYear, onSave, studentVa
           </div>
           {drillDown}
         </>
-      )}
-
-      {EVENT_METHOD_INFO[eventId] && (
-        <div className="panel method-ref-panel">
-          <h3>측정 방법 참고 <span className="board-cat">({ev.name})</span></h3>
-          <div className="method-ref-row">
-            <div className="text-dim small-note method-ref-tip">{EVENT_METHOD_INFO[eventId].tip}</div>
-            <a
-              className="btn btn-secondary method-ref-btn"
-              href={EVENT_METHOD_INFO[eventId].videoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Play size={14} /> 새 탭에서 측정 방법 영상 보기
-            </a>
-          </div>
-          <div className="text-dim small-note">
-            교육부 학생건강정보센터 PAPS 안내자료 기준이에요. 버튼을 누르면 새 탭(또는 유튜브 앱)에서 열려요. 버튼이 반응하지 않으면 아래 주소를 길게 눌러 복사한 뒤 브라우저에 직접 붙여넣어 열어주세요.
-          </div>
-          <div className="method-ref-url-row">
-            <input className="input method-ref-url" readOnly value={EVENT_METHOD_INFO[eventId].videoUrl} onFocus={e => e.target.select()} />
-          </div>
-        </div>
       )}
     </div>
   );
@@ -7633,7 +7635,7 @@ function PapsStyles({ children }) {
         .gate-divider { width: 48px; height: 2px; background: var(--line); border-radius: 999px; margin: 6px 0 16px; }
         .gate-help-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
         .practice-btn { border-color: var(--accent); color: var(--accent); }
-        .practice-badge { border-color: var(--accent); color: var(--accent); }
+        .workspace-badge.practice-badge { background: var(--accent); border-color: var(--accent); color: var(--on-accent); cursor: default; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent); }
         .practice-banner { flex-wrap: wrap; border-color: var(--accent); }
         .practice-banner > span:first-of-type { flex: 1 1 260px; min-width: 0; }
         .practice-banner-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -7685,7 +7687,7 @@ function PapsStyles({ children }) {
         }
         .recovery-inline { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.06em; color: var(--gold); }
 
-        .viewer-badge { cursor: default; }
+        .workspace-badge.viewer-badge { cursor: default; color: var(--text-dim); }
         .tab-badge {
           background: var(--track-red); color: #fff; font-size: 10px; font-weight: 700;
           border-radius: 999px; padding: 1px 6px; margin-left: 2px;
@@ -7703,11 +7705,18 @@ function PapsStyles({ children }) {
         .access-actions { display: flex; gap: 8px; }
 
         .workspace-badge {
-          background: rgba(255,255,255,0.06); border: 1px solid var(--line); color: var(--text-dim);
-          border-radius: 999px; padding: 4px 10px; font-size: 11px; font-family: var(--body);
-          font-weight: 500; cursor: pointer; letter-spacing: 0;
+          display: inline-flex; align-items: center; gap: 6px; min-height: 28px; white-space: nowrap;
+          background: var(--surface-2); border: 1px solid var(--line-2); color: var(--text);
+          border-radius: 999px; padding: 4px 12px; font-size: 12px; font-family: var(--body);
+          font-weight: 700; cursor: pointer; letter-spacing: 0; font-style: normal;
+          transition: background 0.15s ease-out, border-color 0.15s ease-out;
         }
-        .workspace-badge:hover { color: var(--text); border-color: var(--text-dim); }
+        .workspace-badge svg { flex-shrink: 0; }
+        .workspace-badge:hover { border-color: var(--text-dim); }
+        .code-badge { border: 1.5px solid var(--accent-2); color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 8%, transparent); }
+        .code-badge:hover { background: color-mix(in srgb, var(--accent-2) 16%, transparent); border-color: var(--accent-2); }
+        .code-badge .workspace-badge-label { font-weight: 600; opacity: 0.85; }
+        .code-badge b { font-family: var(--mono); letter-spacing: 0.06em; font-weight: 800; color: var(--text); }
 
         .feature-updates-btn {
           display: inline-flex; align-items: center; gap: 5px; background: rgba(255,201,60,0.1);
@@ -7744,7 +7753,18 @@ function PapsStyles({ children }) {
         .tab-danger:hover { background: rgba(232,93,93,0.14); color: #FF8080; }
         .tab-danger.active { background: rgba(232,93,93,0.22); color: #FF8080; }
         .nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; flex-wrap: wrap; }
-        .sync-indicator { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); }
+        /* 제목 옆 상태 배지: 동기화(살아 있으면 초록 점이 숨 쉬듯 깜빡) + 학교 코드/연습모드/조회 전용 */
+        .sync-indicator {
+          display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 11px;
+          border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; font-style: normal;
+          color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--line-2);
+          font-family: var(--body); letter-spacing: 0;
+        }
+        .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+        .sync-indicator.live { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); background: color-mix(in srgb, var(--good) 10%, transparent); }
+        .sync-indicator.live .sync-dot { background: var(--good); box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 55%, transparent); animation: syncPulse 2s ease-out infinite; }
+        @keyframes syncPulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+        @media (prefers-reduced-motion: reduce) { .sync-indicator.live .sync-dot { animation: none; } }
 
         .info-banner {
           display: flex; align-items: center; gap: 8px; padding: 8px 20px;
@@ -8092,7 +8112,13 @@ function PapsStyles({ children }) {
 
         /* ---------- 기록관리 ---------- */
         .record-mgmt { display: flex; flex-direction: column; gap: 18px; }
-        .category-groups { display: flex; flex-direction: row; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+        /* 종목 선택: 측정요소 묶음 다섯 개를 한 줄에. 묶음 너비는 종목 수(--n)에 비례하고,
+           화면이 좁으면 줄바꿈 대신 옆으로 밀어서 봐요. */
+        .category-groups {
+          display: flex; flex-wrap: nowrap; gap: 6px; align-items: stretch;
+          overflow-x: auto; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity;
+          padding-bottom: 4px; margin-top: 4px;
+        }
         .method-ref-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
         .method-ref-tip { flex: 1; min-width: 220px; margin: 0; }
         .method-ref-btn { flex-shrink: 0; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
@@ -8118,15 +8144,44 @@ function PapsStyles({ children }) {
         .situp-audio-error { width: 100%; max-width: 420px; margin-top: 6px; text-align: left; }
         .situp-count-display { display: flex; flex-direction: column; align-items: center; margin: 6px 0; }
         .category-group {
-          display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-          padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
-          border: 1px solid var(--line); border-left: 3px solid var(--cat-color, var(--text-dim));
+          display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+          flex: 1 1 auto; min-width: max-content; scroll-snap-align: start;
+          padding: 6px 6px 8px; border-radius: 10px; background: rgba(255,255,255,0.03);
+          border: 1px solid var(--line); border-top: 3px solid var(--cat-color, var(--text-dim));
         }
+        .category-group .category-label { align-self: flex-start; }
+        .category-scroll-hint { display: none; text-align: center; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+        @media (max-width: 1279px) { .category-scroll-hint { display: block; } }
+        .category-group .chip-row { flex-wrap: nowrap; gap: 5px; padding-top: 4px; }
+        /* 종목 칩: 글자 길이만큼 너비를 나눠 갖고, 사용 체크는 칩 오른쪽 위 모서리에 작게 붙여 한 줄에 다 들어가게 */
+        .category-group .event-chip {
+          position: relative; flex: 1 1 auto; min-height: 44px; justify-content: center; text-align: center;
+          padding: 6px 7px; font-size: 11.5px; letter-spacing: -0.02em; white-space: nowrap; border-radius: 10px;
+        }
+        .category-group .event-chip .chip-skip {
+          position: absolute; top: -7px; right: -5px; padding: 2px; margin: 0; border: none;
+          background: var(--panel); border-radius: 5px;
+        }
+        .category-group .event-chip .mini-check { width: 15px; height: 15px; }
         .category-label {
           font-size: 11px; font-weight: 800; letter-spacing: 0.3px; color: var(--bg);
           padding: 4px 10px; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
         }
         .drill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+        /* 종목별 기록 입력 카드의 학년·반 고르기: 제목 아래 학년 한 줄, 그 밑에 반 한 줄.
+           칸이 모자라면 줄바꿈 대신 옆으로 밀어서 봐요. */
+        .record-mgmt .board-filters.compact {
+          flex-direction: column; flex-wrap: nowrap; gap: 10px; align-self: stretch; width: 100%; box-sizing: border-box;
+        }
+        .record-mgmt .board-filters.compact .filter-group {
+          flex-direction: row; align-items: center; gap: 10px; width: 100%; min-width: 0;
+        }
+        .record-mgmt .board-filters.compact .filter-label { flex: 0 0 auto; min-width: 2.6em; white-space: nowrap; }
+        .record-mgmt .board-filters.compact .chip-row {
+          flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+          justify-content: flex-start; padding: 2px 0;
+        }
+        .record-mgmt .board-filters.compact .chip { flex-shrink: 0; white-space: nowrap; min-height: 36px; }
         .drill-chip {
           display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 10px;
           border: 1px solid var(--line); background: rgba(255,255,255,0.05); color: var(--text-dim);
@@ -8687,7 +8742,7 @@ function PapsStyles({ children }) {
         }
 
         /* 배지류: 모노 라벨 톤 */
-        .year-badge, .workspace-badge { font-family: var(--mono); letter-spacing: 0.04em; }
+        .year-badge { font-family: var(--mono); letter-spacing: 0.04em; }
 
         /* 안내 배너: 톤 정리(따뜻한 코랄 계열로 통일, 기존 초록 정보 배너는 유지) */
         .toast { border-radius: 999px; }
