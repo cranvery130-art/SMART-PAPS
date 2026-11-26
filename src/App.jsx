@@ -26,7 +26,7 @@ import {
   adoptHealthIntoLocal, stripServerHealth, splitHealthAuditEntry, mergeHealthAudit, auditHasServerHealth,
   stripHealthAudit, clearHealthStore, countHealthRecords, buildHealthExport, importHealthFile,
 } from "./healthLocal.js";
-import { usePwaInstall } from "./pwaInstall.js";
+import { usePwaInstall, installSteps } from "./pwaInstall.js";
 
 /* ============================== 상수 정의 ============================== */
 
@@ -2560,6 +2560,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
             <button className="manual-btn" onClick={() => setManualOpen(true)}>
               <BookOpen size={13} /> 사용 가이드
             </button>
+            <InstallHomeButton className="manual-btn install-btn" />
             <button className="manual-btn practice-btn" onClick={onStartPractice}>
               <PlayCircle size={13} /> 연습모드 체험
             </button>
@@ -3552,10 +3553,65 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
   );
 }
 
+// "홈 화면에 설치" 버튼: 안드로이드·PC 크롬은 한 번 눌러 바로 설치 창, 아이폰·아이패드와
+// 버튼 설치가 안 되는 브라우저는 순서 안내 창을 띄워요. 이미 설치한 앱으로 열었으면 숨겨요.
+function InstallHomeButton({ className = "manual-btn install-btn", label = "홈 화면에 설치", iconSize = 13 }) {
+  const pwa = usePwaInstall();
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [done, setDone] = useState(false);
+  if (pwa.installed && !done) return null;
+
+  async function onClick() {
+    if (pwa.canInstall) {
+      const r = await pwa.promptInstall();
+      if (r?.outcome === "accepted") setDone(true);
+      return;
+    }
+    setGuideOpen(true);
+  }
+
+  return (
+    <>
+      <button type="button" className={className} onClick={onClick} disabled={done}>
+        {done ? <><Check size={iconSize} /> 설치했어요</> : <><Download size={iconSize} /> {label}</>}
+      </button>
+      {guideOpen && <InstallGuideModal pwa={pwa} onClose={() => setGuideOpen(false)} />}
+    </>
+  );
+}
+
+function InstallGuideModal({ pwa, onClose }) {
+  useBackLayer(true, () => { onClose(); return true; });
+  const steps = installSteps(pwa);
+  const heading = pwa.isIOS ? "아이폰·아이패드에 설치하기" : pwa.isAndroid ? "휴대폰·태블릿에 설치하기" : "이 컴퓨터에 설치하기";
+  return (
+    <div className="modal-backdrop install-backdrop" onClick={e => { e.stopPropagation(); onClose(); }}>
+      <div className="modal-panel install-panel" role="dialog" aria-modal="true" aria-label={heading} onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3><Download size={18} /> {heading}</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="닫기"><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="text-dim small-note install-lead">
+            홈 화면에 아이콘이 생겨 주소를 치지 않고 바로 열려요. 기록은 지금처럼 학교 코드로 들어가서 보고 입력해요.
+          </p>
+          {steps.map((t, i) => (
+            <div className="share-step" key={i}>
+              <span className="share-step-num">{i + 1}</span>
+              <div className="share-step-body install-step-text">{t}</div>
+            </div>
+          ))}
+          <button className="btn btn-primary install-ok" onClick={onClose}>알겠어요</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ShareGuideModal({ workspaceCode, onClose }) {
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const { canInstall, promptInstall, isIOS, isStandalone } = usePwaInstall();
+  const { canInstall, isIOS, isStandalone } = usePwaInstall();
 
   async function copyCode() {
     try {
@@ -3627,20 +3683,13 @@ function ShareGuideModal({ workspaceCode, onClose }) {
           <h3>홈 화면에 앱처럼 설치</h3>
           {isStandalone ? (
             <div className="text-dim small-note">이미 홈 화면 앱으로 열려 있어요.</div>
-          ) : isIOS ? (
-            <div className="text-dim small-note">
-              아이폰(사파리)에서는 자동 설치 버튼이 없어요. 하단의 <b>공유</b> 버튼을 누른 뒤{" "}
-              <b>"홈 화면에 추가"</b>를 직접 눌러주세요.
-            </div>
-          ) : canInstall ? (
-            <button className="btn btn-primary" onClick={promptInstall}>
-              <Smartphone size={14} /> 홈 화면에 설치
-            </button>
           ) : (
-            <div className="text-dim small-note">
-              브라우저 메뉴에서 "홈 화면에 추가" 또는 "앱 설치"를 눌러도 같은 효과가 있어요.
-              (이미 설치되어 있거나, 이 브라우저가 자동 설치를 지원하지 않을 수 있어요.)
-            </div>
+            <>
+              <div className="text-dim small-note" style={{ marginBottom: 8 }}>
+                {canInstall ? "한 번 눌러 승인하면 홈 화면에 SMART PAPS 아이콘이 생겨요." : isIOS ? "아이폰·아이패드는 버튼 설치가 안 돼서, 누르면 홈 화면에 추가하는 순서를 보여 드려요." : "누르면 이 브라우저에서 설치하는 순서를 보여 드려요."}
+              </div>
+              <InstallHomeButton className="btn btn-primary" iconSize={14} />
+            </>
           )}
         </div>
       </div>
@@ -7645,6 +7694,14 @@ function PapsStyles({ children }) {
           padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; margin-bottom: 4px;
         }
         .manual-btn:hover { background: rgba(255,201,60,0.22); }
+        .install-btn { border-color: var(--line); color: var(--text); background: transparent; }
+        .install-btn:hover { background: rgba(127,127,127,0.10); }
+        .install-btn:disabled { opacity: 0.7; cursor: default; }
+        @media (pointer: coarse) { .gate-help-row .manual-btn { min-height: 44px; padding: 8px 14px; font-size: 13px; } }
+        .install-panel { max-width: 420px; text-align: left; }
+        .install-lead { margin: 0 0 14px; }
+        .install-step-text { font-size: 14px; color: var(--text); line-height: 1.55; padding-top: 1px; }
+        .install-ok { width: 100%; justify-content: center; min-height: 44px; margin-top: 4px; }
         .gate-input { width: 100%; text-align: center; margin-bottom: 4px; }
         .gate-input-hint { font-size: 13px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
         .gate-privacy { display: block; margin-top: 16px; text-align: center; font-size: 12.5px; color: var(--text-dim); text-decoration: underline; text-underline-offset: 3px; }
