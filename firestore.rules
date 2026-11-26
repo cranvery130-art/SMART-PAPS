@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// SMART PAPS Firestore 보안 규칙
+// AI:PAPS(옛 SMART PAPS) Firestore 보안 규칙
 //
 // ───────────────────────────────────────────────────────────────
 // [보안 구조] (2026-10 개편)

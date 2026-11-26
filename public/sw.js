@@ -1,7 +1,7 @@
 // 최소한의 서비스워커. 오프라인 캐싱 전략을 복잡하게 가져가는 대신, 설치(installable) 조건을
 // 만족시키고 앱 셸(껍데기) 정도만 가볍게 캐시하는 데 목적을 둔다 — 기록 데이터 자체는 항상
 // Firestore에서 최신 값을 받아오므로, 여기서 데이터까지 오프라인 캐싱하려 하지 않는다.
-const CACHE_NAME = "smart-paps-shell-v2";
+const CACHE_NAME = "smart-paps-shell-v3";
 const SHELL_URLS = ["/", "/index.html", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

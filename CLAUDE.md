@@ -1,6 +1,6 @@
-# SMART PAPS (smart-paps)
+# AI:PAPS 아이팝스 (smart-paps, 옛 이름 SMART PAPS)
 
-중학교 체육수업용 PAPS 실시간 기록·랭킹 관리 프로그램이에요. React + Vite + Firebase(Firestore, 익명 로그인)이고 Vercel로 배포해요.
+중학교 체육수업용 PAPS 실시간 기록·랭킹 관리 프로그램이에요. 이름의 AI는 '아이(학생)'로 읽히게 지은 말이고 인공지능 기능은 없어요. 글자 로고는 `src/BrandMark.jsx` 하나만 써요. React + Vite + Firebase(Firestore, 익명 로그인)이고 Vercel로 배포해요.
 
 ## 구조와 실행
 

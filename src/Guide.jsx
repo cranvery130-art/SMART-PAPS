@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import BrandMark from "./BrandMark.jsx";
 import {
   BookOpen, X, ChevronLeft, ChevronRight, PlayCircle, ExternalLink,
   Users, Plus, Database, ShieldCheck, Trash2, Info,
@@ -69,7 +70,7 @@ const STEPS = [
     Demo: () => (
       <Screen label="새 코드 만들기 화면">
         <div className="gd-center">
-          <b className="gd-brand">SMART PAPS</b>
+          <b className="gd-brand"><BrandMark /></b>
           <T n="1"><Btn>처음이신가요? 새 코드 만들기</Btn></T>
           <T n="2" block>
             <span className="gd-stack">

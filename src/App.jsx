@@ -21,6 +21,7 @@ import {
   makePracticeStudents, makePracticeRecords, makePracticeAccessList,
 } from "./practice.js";
 import { GuidePanel, GuideModal } from "./Guide.jsx";
+import BrandMark, { APP_NAME, APP_READING } from "./BrandMark.jsx";
 import {
   HEALTH_FILE_KIND, isHealthMarker, mergeLocalHealth, splitHealthForServer, findServerHealthValues,
   adoptHealthIntoLocal, stripServerHealth, splitHealthAuditEntry, mergeHealthAudit, auditHasServerHealth,
@@ -2366,7 +2367,6 @@ export default function PapsApp({ initialWorkspaceCode = null, forcePresentation
 // 줄이도록 설정한 기기(prefers-reduced-motion)에서는 연출 없이 곧바로 건너뛴다.
 function IntroSplash({ onDone }) {
   const [fading, setFading] = useState(false);
-  const title = "SMART PAPS";
   const rootRef = useRef(null);
   const heroRef = useRef(null);
   const chipRef = useRef(null);
@@ -2421,7 +2421,7 @@ function IntroSplash({ onDone }) {
   }, [fading, onDone]);
 
   return (
-    <div ref={rootRef} className={"intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)} role="img" aria-label="SMART PAPS 시작 화면">
+    <div ref={rootRef} className={"intro-splash" + (fading ? " intro-fading" : "")} onClick={() => setFading(true)} role="img" aria-label={APP_NAME + "(" + APP_READING + ") 시작 화면"}>
       <div className="intro-reveal" aria-hidden="true"><div className="intro-floor" /></div>
       <div className="intro-hero" ref={heroRef} aria-hidden="true">
         <span className="intro-ring" />
@@ -2445,26 +2445,15 @@ function IntroSplash({ onDone }) {
         </div>
         <div className="intro-result"><span className="intro-pill p1">2등급</span><span className="intro-pill p2">반 1위</span></div>
       </div>
-      <div className="intro-splash-title" aria-label={title}>
-        {/* 글자를 단어 단위로 묶어서, 화면이 좁아도 "SMART PAP / S"처럼 단어 중간에서 줄이 바뀌지 않게 한다. */}
-        {title.split(" ").map((word, w, words) => {
-          const start = words.slice(0, w).join(" ").length + (w > 0 ? 1 : 0);
-          return (
-            <span key={w} className={"intro-word" + (w === 1 ? " intro-word-accent" : "")}>
-              {word.split("").map((ch, i) => (
-                <span key={i} className="intro-letter" style={{ animationDelay: (1.3 + (start + i) * 0.03) + "s" }}>
-                  {ch}
-                </span>
-              ))}
-            </span>
-          );
-        })}
+      <div className="intro-splash-title">
+        {/* AI:PAPS 글자가 하나씩 떨어지고, 아래에 '아이 · 팝스' 읽는 법이 나타나요 */}
+        <BrandMark reading dropFrom={1.3} />
       </div>
       <div className="intro-splash-tagline" style={{ animationDelay: "1.5s" }}>
         측정부터 등급, 나이스 제출까지 <span className="intro-nowrap">— 한 번에</span>
       </div>
       <div className="intro-bar" aria-hidden="true"><i /></div>
-      <div className="intro-sign">YANGSSAEM STUDIO · PAPS</div>
+      <div className="intro-sign">YANGSSAEM STUDIO · AI:PAPS</div>
     </div>
   );
 }
@@ -2546,10 +2535,10 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
     return (
       <div className="paps-app gate-screen">
         <div className="gate-card">
-          <div className="gate-maker"><img src="/icons/yangssaem-face.webp" alt="" width="24" height="24" /><span><b>양쌤스튜디오</b> · 팝스</span></div>
+          <div className="gate-maker"><img src="/icons/yangssaem-face.webp" alt="" width="24" height="24" /><span><b>양쌤스튜디오</b> · 아이팝스</span></div>
           <div className="gate-brand">
             <Trophy size={26} color="var(--gold)" />
-            <span className="gate-brand-name">SMART PAPS</span>
+            <span className="gate-brand-name"><BrandMark reading /></span>
             <Trophy size={26} color="var(--gold)" />
           </div>
           <p className="gate-tagline">
@@ -3304,7 +3293,7 @@ function TopNav({ view, setView, role, isFounder, pendingCount, schoolName, last
           {secAgo !== null ? secAgo + "초 전 동기화" : "동기화 대기"}
         </span>
         <Trophy size={20} color="var(--gold)" />
-        <span className="brand-text">{schoolName ? schoolName + " " : ""}SMART PAPS</span>
+        <span className="brand-text">{schoolName ? <span className="brand-school">{schoolName}</span> : null}<BrandMark /></span>
         {isPractice ? (
           <span className="workspace-badge practice-badge" title="가짜 학생으로 체험 중"><PlayCircle size={13} />연습모드</span>
         ) : isAdmin ? (
@@ -3439,7 +3428,7 @@ function IdleLockScreen({ onUnlock, error }) {
 // 복구 코드 메모 파일
 function downloadRecoveryMemo(workspaceCode, recoveryCode) {
   const lines = [
-    "SMART PAPS 복구 코드 메모",
+    APP_NAME + "(" + APP_READING + ") 복구 코드 메모",
     "",
     "학교 코드: " + workspaceCode,
     "복구 코드: " + recoveryCode,
@@ -3451,7 +3440,7 @@ function downloadRecoveryMemo(workspaceCode, recoveryCode) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "smart-paps-" + workspaceCode + "-복구코드.txt";
+  a.download = "aipaps-" + workspaceCode + "-복구코드.txt";
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -3500,7 +3489,7 @@ function RecoveryCodeModal({ workspaceCode, recoveryCode, onClose }) {
 function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword, recoveryCode, onClose }) {
   function downloadMemo() {
     const lines = [
-      "SMART PAPS 학교 코드 메모",
+      APP_NAME + "(" + APP_READING + ") 학교 코드 메모",
       "",
       "학교 코드: " + workspaceCode,
       "접근 신청 비밀번호(동료 교사용): " + (viewerPassword || "(설정 안 함)"),
@@ -3515,7 +3504,7 @@ function CodeCreatedNoticeModal({ workspaceCode, viewerPassword, founderPassword
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "smart-paps-" + workspaceCode + "-메모.txt";
+    a.download = "aipaps-" + workspaceCode + "-메모.txt";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -7570,8 +7559,7 @@ function PapsStyles({ children }) {
           font-size: clamp(36px, 9vw, 60px); font-weight: 400; letter-spacing: 0.02em;
           color: #1D2747; position: relative; z-index: 1; max-width: 100%; margin-top: 10px;
         }
-        .intro-word { display: inline-flex; white-space: nowrap; }
-        .intro-word-accent { color: #E2622B; }
+        .intro-splash-title .aipaps { font-size: clamp(46px, 13vw, 76px); }
         .intro-letter { display: inline-block; opacity: 0; animation: introLetterDrop 0.4s var(--ease-out) forwards; }
         @keyframes introLetterDrop {
           0% { opacity: 0; transform: translateY(-14px); }
@@ -7739,7 +7727,12 @@ function PapsStyles({ children }) {
           background: rgba(255,255,255,0.02); flex-wrap: wrap;
         }
         .brand { display: flex; align-items: center; gap: 8px; font-family: var(--display); font-weight: 600; letter-spacing: 0.3px; }
-        .brand-text { font-size: 16px; }
+        .brand-text { font-size: 16px; display: inline-flex; align-items: center; gap: 6px; }
+        .brand-text .aipaps { font-size: 20px; font-style: normal; }
+        .brand-school { font-family: var(--display); }
+        .gate-brand-name .aipaps { font-size: 34px; }
+        .gate-brand-name .aipaps-paps { color: var(--text); }
+        .brand-text .aipaps-paps { color: var(--text); }
         .tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
         .tab {
           display: flex; align-items: center; gap: 6px; padding: 8px 12px;
@@ -8670,7 +8663,7 @@ function PapsStyles({ children }) {
         /* ================= P.A.I Studio 감성 디테일 레이어 =================
            위에서 이미 만든 클래스들의 값을 그대로 덮어써서, 어두운 무채색 배경
            + 코랄→퍼플 그라디언트 강조 + 이탤릭 디스플레이 서체 + 모노 라벨이라는
-           P.A.I Studio 홈페이지의 감성을 SMART PAPS 전체에 입힌다. 구조(클래스명)는
+           P.A.I Studio 홈페이지의 감성을 앱 전체에 입힌다. 구조(클래스명)는
            하나도 바꾸지 않고 "톤앤매너"만 새로 입히는 레이어라, 기능에는 영향이 없다. */
 
         .paps-app ::selection { background: var(--track-red); color: var(--on-accent); }
