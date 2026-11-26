@@ -4,7 +4,7 @@ import React from "react";
 // 흔드는 팔 = 가로획), i는 점 자리가 초시계인 모양으로 그렸어요. 두 글자는 PAPS 글자(Jua)의
 // 대문자 높이·획 굵기에 맞춰 그려서 글자 줄에 튀지 않게 섞여요. 이 앱에 인공지능 기능은 없으니,
 // 이름을 설명하는 문구에서도 AI 기능이 있다고 말하지 않아요.
-//  - reading: 글자 아래 '아이'·'팝스' 읽는 법을 보여 줄지
+//  - kicker: 이름 위에 '우리 아이 팝스 측정할 땐' 한 줄을 얹을지(시작화면·첫 화면)
 //  - dropFrom: 숫자를 주면 글자가 위에서 하나씩 떨어지는 연출(시작 화면용, 초 단위 시작 시각)
 // 그림 좌표는 글꼴 단위(1em = 1000, 대문자 높이 712)예요. 앱 아이콘(design/app-icon)도 같은 좌표를 써요.
 export const APP_NAME = "AI:PAPS";
@@ -37,21 +37,20 @@ function Letters({ text, start, step }) {
   ));
 }
 
-export default function BrandMark({ reading = false, dropFrom, className = "" }) {
+export default function BrandMark({ kicker = false, dropFrom, className = "" }) {
   const step = 0.04;
   const drop = dropFrom != null;
-  const readStyle = drop ? { animationDelay: (dropFrom + 0.4) + "s" } : undefined;
+  const kickStyle = drop ? { animationDelay: Math.max(0, dropFrom - 0.15) + "s" } : undefined;
   return (
-    <span className={"aipaps" + (reading ? " has-reading" : "") + (drop ? " is-drop" : "") + (className ? " " + className : "")}
+    <span className={"aipaps" + (kicker ? " has-kicker" : "") + (drop ? " is-drop" : "") + (className ? " " + className : "")}
       role="img" aria-label={APP_NAME + " (" + APP_READING + ")"}>
+      {kicker && <small className="aipaps-kicker" style={kickStyle} aria-hidden="true">우리 <em>아이</em> 팝스 측정할 땐</small>}
       <span className={"aipaps-ai" + (drop ? " aipaps-letter" : "")} style={drop ? { animationDelay: dropFrom + "s" } : undefined} aria-hidden="true">
         <AiMark />
       </span>
       <b className="aipaps-paps" aria-hidden="true">
         {drop ? <Letters text=":PAPS" start={dropFrom + step * 2} step={step} /> : <><span className="aipaps-colon">:</span>PAPS</>}
       </b>
-      {reading && <small className="aipaps-read r1" style={readStyle} aria-hidden="true">아이</small>}
-      {reading && <small className="aipaps-read r2" style={readStyle} aria-hidden="true">팝스</small>}
       <style>{BRAND_CSS}</style>
     </span>
   );
@@ -66,14 +65,13 @@ const BRAND_CSS = `
 .aipaps-mark { display: block; height: 0.712em; width: auto; overflow: visible; }
 .aipaps-paps { font-weight: inherit; display: inline-flex; justify-self: start; }
 .aipaps-colon { color: #E2622B; margin: 0 0.02em 0 0.04em; }
-.aipaps-read { font-size: 0.3em; letter-spacing: 0.14em; margin-top: 0.3em; padding-left: 0.14em; opacity: 0.72; font-weight: 400; }
-.aipaps-read.r1 { grid-column: 1; grid-row: 2; color: #E2622B; opacity: 0.9; }
-.aipaps-read.r2 { grid-column: 2; grid-row: 2; justify-self: center; padding-left: 0.6em; }
+.aipaps-kicker { grid-column: 1 / -1; font-size: max(12px, 0.3em); letter-spacing: 0.06em; margin-bottom: 0.45em; opacity: 0.78; font-weight: 400; }
+.aipaps-kicker em { font-style: normal; color: #E2622B; }
 .aipaps-letter { display: inline-block; opacity: 0; animation: aipapsDrop 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-.aipaps.is-drop .aipaps-read { opacity: 0; animation: aipapsFade 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.aipaps.is-drop .aipaps-kicker { opacity: 0; animation: aipapsFade 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 @keyframes aipapsDrop { 0% { opacity: 0; transform: translateY(-14px); } 100% { opacity: 1; transform: none; } }
 @keyframes aipapsFade { 0% { opacity: 0; transform: translateY(4px); } 100% { opacity: 0.8; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .aipaps-letter, .aipaps.is-drop .aipaps-read { animation: none; opacity: 1; transform: none; }
+  .aipaps-letter, .aipaps.is-drop .aipaps-kicker { animation: none; opacity: 1; transform: none; }
 }
 `;

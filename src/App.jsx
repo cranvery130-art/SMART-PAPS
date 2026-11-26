@@ -2446,8 +2446,8 @@ function IntroSplash({ onDone }) {
         <div className="intro-result"><span className="intro-pill p1">2등급</span><span className="intro-pill p2">반 1위</span></div>
       </div>
       <div className="intro-splash-title">
-        {/* AI:PAPS 글자가 하나씩 떨어지고, 아래에 '아이 · 팝스' 읽는 법이 나타나요 */}
-        <BrandMark reading dropFrom={1.3} />
+        {/* '우리 아이 팝스 측정할 땐' 아래로 AI:PAPS 글자가 하나씩 떨어져요 */}
+        <BrandMark kicker dropFrom={1.3} />
       </div>
       <div className="intro-splash-tagline" style={{ animationDelay: "1.5s" }}>
         측정부터 등급, 나이스 제출까지 <span className="intro-nowrap">— 한 번에</span>
@@ -2538,7 +2538,7 @@ function WorkspaceGate({ onSubmit, onRequestAccess, onRecover, onEnterAfterRecov
           <div className="gate-maker"><img src="/icons/yangssaem-face.webp" alt="" width="24" height="24" /><span><b>양쌤스튜디오</b> · 아이팝스</span></div>
           <div className="gate-brand">
             <Trophy size={26} color="var(--gold)" />
-            <span className="gate-brand-name"><BrandMark reading /></span>
+            <span className="gate-brand-name"><BrandMark kicker /></span>
             <Trophy size={26} color="var(--gold)" />
           </div>
           <p className="gate-tagline">
