@@ -3675,7 +3675,7 @@ function ShareGuideModal({ workspaceCode, onClose }) {
           ) : (
             <>
               <div className="text-dim small-note" style={{ marginBottom: 8 }}>
-                {canInstall ? "한 번 눌러 승인하면 홈 화면에 SMART PAPS 아이콘이 생겨요." : isIOS ? "아이폰·아이패드는 버튼 설치가 안 돼서, 누르면 홈 화면에 추가하는 순서를 보여 드려요." : "누르면 이 브라우저에서 설치하는 순서를 보여 드려요."}
+                {canInstall ? "한 번 눌러 승인하면 홈 화면에 AI:PAPS 아이콘이 생겨요." : isIOS ? "아이폰·아이패드는 버튼 설치가 안 돼서, 누르면 홈 화면에 추가하는 순서를 보여 드려요." : "누르면 이 브라우저에서 설치하는 순서를 보여 드려요."}
               </div>
               <InstallHomeButton className="btn btn-primary" iconSize={14} />
             </>
